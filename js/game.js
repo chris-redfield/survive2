@@ -456,67 +456,102 @@ class Game {
             while (angle < 0) angle += TWO_PI;
             while (angle >= TWO_PI) angle -= TWO_PI;
 
-            const right = angle < Math.PI / 2 || angle > Math.PI * 1.5;
-            const up = angle < Math.PI;
-            const tanA = Math.tan(rayAngle);
-
-            // Collect wall hits (all hits when jumping, first hit when on ground)
+            // Unified DDA - single pass through cells in ray order
             const hits = [];
-            let foundFirst = false;
+            const dirX = Math.cos(rayAngle);
+            const dirY = -Math.sin(rayAngle);
 
-            // Vertical intersections
-            const vStepX = right ? this.TILE_SIZE : -this.TILE_SIZE;
-            let vx = right
-                ? Math.floor(this.player.x / this.TILE_SIZE) * this.TILE_SIZE + this.TILE_SIZE
-                : Math.floor(this.player.x / this.TILE_SIZE) * this.TILE_SIZE - 0.001;
-            let vy = this.player.y + (this.player.x - vx) * tanA;
-            const vStepY = -vStepX * tanA;
+            // Starting cell
+            let cx = Math.floor(this.player.x / this.TILE_SIZE);
+            let cy = Math.floor(this.player.y / this.TILE_SIZE);
 
-            for (let i = 0; i < 20; i++) {
-                const cx = Math.floor(vx / this.TILE_SIZE);
-                const cy = Math.floor(vy / this.TILE_SIZE);
-                if (cx < 0 || cx >= MAP_WIDTH || cy < 0 || cy >= MAP_HEIGHT) break;
+            // Step directions
+            const stepX = dirX >= 0 ? 1 : -1;
+            const stepY = dirY >= 0 ? 1 : -1;
 
-                const wall = this.raycaster.cellAt(cx, cy, 0);
-                if (wall > 0 && !Raycaster.isHorizontalDoor(wall)) {
-                    if (!(Raycaster.isDoor(wall) && this.doors[cx + cy * MAP_WIDTH])) {
-                        const dx = vx - this.player.x, dy = vy - this.player.y;
-                        const dist = Math.sqrt(dx*dx + dy*dy);
-                        let texX = vy % this.TILE_SIZE;
-                        if (!right) texX = this.TILE_SIZE - texX;
-                        hits.push({ dist, horiz: false, type: wall, texX });
-                        if (!canSeeOverWalls) { foundFirst = true; break; }
-                    }
-                }
-                vx += vStepX; vy += vStepY;
+            // Distance to cross one full cell
+            const tDeltaX = dirX !== 0 ? Math.abs(this.TILE_SIZE / dirX) : Infinity;
+            const tDeltaY = dirY !== 0 ? Math.abs(this.TILE_SIZE / dirY) : Infinity;
+
+            // Distance to first cell boundary
+            let tMaxX, tMaxY;
+            if (dirX > 0) {
+                tMaxX = ((cx + 1) * this.TILE_SIZE - this.player.x) / dirX;
+            } else if (dirX < 0) {
+                tMaxX = (cx * this.TILE_SIZE - this.player.x) / dirX;
+            } else {
+                tMaxX = Infinity;
+            }
+            if (dirY > 0) {
+                tMaxY = ((cy + 1) * this.TILE_SIZE - this.player.y) / dirY;
+            } else if (dirY < 0) {
+                tMaxY = (cy * this.TILE_SIZE - this.player.y) / dirY;
+            } else {
+                tMaxY = Infinity;
             }
 
-            // Horizontal intersections
-            const hStepY = up ? -this.TILE_SIZE : this.TILE_SIZE;
-            let hy = up
-                ? Math.floor(this.player.y / this.TILE_SIZE) * this.TILE_SIZE - 0.001
-                : Math.floor(this.player.y / this.TILE_SIZE) * this.TILE_SIZE + this.TILE_SIZE;
-            let hx = this.player.x + (this.player.y - hy) / tanA;
-            const hStepX = -hStepY / tanA;
+            // Check if starting cell is a wall
+            const startWall = this.raycaster.cellAt(cx, cy, 0);
+            const startKey = cx + cy * MAP_WIDTH;
+            let prevWall = (startWall > 0 && !(Raycaster.isDoor(startWall) && this.doors[startKey])) ? startWall : 0;
 
-            for (let i = 0; i < 20; i++) {
-                const cx = Math.floor(hx / this.TILE_SIZE);
-                const cy = Math.floor(hy / this.TILE_SIZE);
+            for (let i = 0; i < 30; i++) {
+                // Which boundary is closer?
+                const crossVertical = tMaxX < tMaxY;
+                const crossDist = crossVertical ? tMaxX : tMaxY;
+
+                // Calculate hit position at the boundary
+                const hitX = this.player.x + dirX * crossDist;
+                const hitY = this.player.y + dirY * crossDist;
+
+                // Step to next cell
+                if (crossVertical) {
+                    cx += stepX;
+                    tMaxX += tDeltaX;
+                } else {
+                    cy += stepY;
+                    tMaxY += tDeltaY;
+                }
+
+                // Bounds check
                 if (cx < 0 || cx >= MAP_WIDTH || cy < 0 || cy >= MAP_HEIGHT) break;
 
+                // Check new cell
                 const wall = this.raycaster.cellAt(cx, cy, 0);
-                if (wall > 0 && !Raycaster.isVerticalDoor(wall)) {
-                    if (!(Raycaster.isDoor(wall) && this.doors[cx + cy * MAP_WIDTH])) {
-                        const dx = hx - this.player.x, dy = hy - this.player.y;
-                        const dist = Math.sqrt(dx*dx + dy*dy);
-                        let texX = hx % this.TILE_SIZE;
-                        if (!up) texX = this.TILE_SIZE - texX;
-                        hits.push({ dist, horiz: true, type: wall, texX });
-                        if (!canSeeOverWalls && foundFirst) break;
-                        if (!canSeeOverWalls) { foundFirst = true; break; }
+                const cellKey = cx + cy * MAP_WIDTH;
+                const isOpenDoor = Raycaster.isDoor(wall) && this.doors[cellKey];
+                const isSolid = wall > 0 && !isOpenDoor;
+
+                // Front face: entering wall from empty space
+                if (isSolid && prevWall === 0) {
+                    let texX;
+                    if (crossVertical) {
+                        // Crossed a vertical boundary (east/west face)
+                        texX = ((hitY % this.TILE_SIZE) + this.TILE_SIZE) % this.TILE_SIZE;
+                        if (stepX < 0) texX = this.TILE_SIZE - texX;
+                    } else {
+                        // Crossed a horizontal boundary (north/south face)
+                        texX = ((hitX % this.TILE_SIZE) + this.TILE_SIZE) % this.TILE_SIZE;
+                        if (stepY > 0) texX = this.TILE_SIZE - texX;
                     }
+                    hits.push({ dist: crossDist, horiz: !crossVertical, type: wall, texX });
+                    if (!canSeeOverWalls) break;
                 }
-                hx += hStepX; hy += hStepY;
+
+                // Back face: exiting wall into empty space
+                if (!isSolid && prevWall > 0 && canSeeOverWalls) {
+                    let texX;
+                    if (crossVertical) {
+                        texX = ((hitY % this.TILE_SIZE) + this.TILE_SIZE) % this.TILE_SIZE;
+                        if (stepX > 0) texX = this.TILE_SIZE - texX;
+                    } else {
+                        texX = ((hitX % this.TILE_SIZE) + this.TILE_SIZE) % this.TILE_SIZE;
+                        if (stepY < 0) texX = this.TILE_SIZE - texX;
+                    }
+                    hits.push({ dist: crossDist, horiz: !crossVertical, type: prevWall, texX });
+                }
+
+                prevWall = isSolid ? wall : 0;
             }
 
             // Sort hits by distance (near to far)
