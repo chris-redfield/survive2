@@ -97,6 +97,27 @@ class Game {
         return canvas;
     }
 
+    // Create seamless sky by adding horizontally flipped version
+    createSeamlessSky(img) {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width * 2;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+
+        // Draw original image on the left
+        ctx.drawImage(img, 0, 0);
+
+        // Draw horizontally flipped image on the right
+        ctx.save();
+        ctx.translate(img.width * 2, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(img, 0, 0);
+        ctx.restore();
+
+        console.log(`Seamless sky created: ${canvas.width}x${canvas.height}`);
+        return canvas;
+    }
+
     async loadTextures() {
         try {
             console.log('Loading textures from GitHub...');
@@ -111,8 +132,9 @@ class Game {
             this.floorImage = await this.loadImage(GITHUB_RAW + 'mossycobble.bmp');
             this.ceilingImage = await this.loadImage(GITHUB_RAW + 'default_brick.bmp');
 
-            // Load sky
-            this.skyImage = await this.loadImage(GITHUB_RAW + 'skybox2.bmp');
+            // Load sky (use night sky image with horizontal flip for seamless wrapping)
+            const skyImg = await this.loadImage('assets/night_sky_2.png');
+            this.skyImage = this.createSeamlessSky(skyImg);
 
             // Load sprites and remove magenta background
             let spriteImg = await this.loadImage(GITHUB_RAW + 'tree.bmp');
@@ -345,28 +367,44 @@ class Game {
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, W, H);
 
-        // Draw sky - scrolls with player rotation
+        // Draw sky - fixed height with clipping (like tiny-village-survive)
         if (this.skyImage) {
             const skyW = this.skyImage.width;
             const skyH = this.skyImage.height;
-            const skyDrawH = Math.max(1, halfH + this.pitch);
+            const horizonY = halfH + this.pitch;
 
-            // Calculate offset based on rotation (2x for full panorama effect)
-            const offset = Math.floor(((this.player.rot / TWO_PI) * skyW * 2) % skyW);
+            // Fixed sky height (doesn't stretch with pitch)
+            const fixedSkyHeight = H * 0.95;
+            const visibleSkyHeight = Math.max(0, Math.min(fixedSkyHeight, horizonY));
 
-            // Draw first portion
-            const firstWidth = Math.min(skyW - offset, W);
-            if (firstWidth > 0) {
+            // Fill background for sky area (dark for night sky)
+            ctx.fillStyle = '#0a0a1a';
+            ctx.fillRect(0, 0, W, Math.max(0, horizonY));
+
+            if (visibleSkyHeight > 0) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(0, 0, W, visibleSkyHeight);
+                ctx.clip();
+
+                // Calculate horizontal offset based on rotation (25% slower parallax, reversed direction)
+                let xOffset = -(this.player.rot / TWO_PI) * skyW * 0.75;
+                xOffset = ((xOffset % skyW) + skyW) % skyW;
+
+                // Draw sky with seamless horizontal wrapping at fixed height
                 ctx.drawImage(this.skyImage,
-                    offset, 0, firstWidth, skyH,
-                    0, 0, firstWidth, skyDrawH);
-            }
+                    xOffset, 0, skyW - xOffset, skyH,
+                    0, 0, W * (1 - xOffset / skyW), fixedSkyHeight
+                );
 
-            // Draw wrapped portion if needed
-            if (firstWidth < W) {
-                ctx.drawImage(this.skyImage,
-                    0, 0, W - firstWidth, skyH,
-                    firstWidth, 0, W - firstWidth, skyDrawH);
+                if (xOffset > 0) {
+                    ctx.drawImage(this.skyImage,
+                        0, 0, xOffset, skyH,
+                        W * (1 - xOffset / skyW), 0, W * (xOffset / skyW), fixedSkyHeight
+                    );
+                }
+
+                ctx.restore();
             }
         }
 
