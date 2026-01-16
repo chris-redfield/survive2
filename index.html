@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JavaScript Raycasting Engine</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: monospace;
+        }
+        #container {
+            position: relative;
+        }
+        #gameCanvas {
+            display: block;
+            image-rendering: pixelated;
+        }
+        #minimap {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            border: 1px solid #fff;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: #0f0;
+            font-size: 12px;
+            text-align: right;
+        }
+        #controls {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: #888;
+            font-size: 11px;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        <canvas id="minimap" width="256" height="192"></canvas>
+        <div id="info">
+            <div id="fps">FPS: 0</div>
+            <div id="position">X: 0 Y: 0</div>
+        </div>
+        <div id="controls">
+            WASD: Move/Strafe | Arrows: Turn/Move | F: Doors | M: Minimap | PgUp/PgDn: Look
+        </div>
+    </div>
+
+    <script src="js/shape.js"></script>
+    <script src="js/raycaster.js"></script>
+    <script src="js/maps.js"></script>
+    <script src="js/game.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
