@@ -231,6 +231,7 @@ class Game {
     }
 
     setupInput() {
+        // Keyboard controls
         document.addEventListener('keydown', (e) => {
             this.keys[e.code] = true;
             if (e.code === 'KeyM') {
@@ -243,6 +244,35 @@ class Game {
             }
         });
         document.addEventListener('keyup', (e) => this.keys[e.code] = false);
+
+        // Mouse look controls with pointer lock
+        this.mouseSensitivity = 0.002;
+        this.pitchSensitivity = 0.3;
+        this.maxPitch = 300;
+
+        // Click canvas to enable mouse look
+        this.canvas.addEventListener('click', () => {
+            this.canvas.requestPointerLock();
+        });
+
+        // Handle mouse movement when pointer is locked
+        document.addEventListener('mousemove', (e) => {
+            if (document.pointerLockElement === this.canvas) {
+                // Horizontal movement = rotation
+                this.player.rot -= e.movementX * this.mouseSensitivity;
+
+                // Vertical movement = pitch (look up/down)
+                this.pitch -= e.movementY * this.pitchSensitivity;
+                this.pitch = Math.max(-this.maxPitch, Math.min(this.maxPitch, this.pitch));
+            }
+        });
+
+        // Show instruction when pointer lock changes
+        document.addEventListener('pointerlockchange', () => {
+            if (document.pointerLockElement === this.canvas) {
+                console.log('Mouse look enabled - Press ESC to release');
+            }
+        });
     }
 
     interactDoor() {
