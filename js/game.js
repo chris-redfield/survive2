@@ -22,7 +22,12 @@ class Game {
         this.player = {
             x: 0, y: 0, z: 0, rot: 0,
             moveSpeed: 4,
-            rotSpeed: 0.05
+            rotSpeed: 0.05,
+            // Jump physics
+            velocityZ: 0,
+            groundZ: 0,
+            jumpStrength: 12,
+            gravity: 0.5
         };
 
         this.pitch = 0;
@@ -95,6 +100,16 @@ class Game {
 
         ctx.putImageData(imageData, 0, 0);
         return canvas;
+    }
+
+    // Get pixel data from image for direct sampling
+    getImageData(img) {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        return ctx.getImageData(0, 0, img.width, img.height);
     }
 
     // Create seamless sky by adding horizontally flipped version
@@ -353,6 +368,17 @@ class Game {
 
         if (this.keys['PageUp']) this.pitch = Math.min(this.pitch + 10, 200);
         if (this.keys['PageDown']) this.pitch = Math.max(this.pitch - 10, -200);
+
+        // Jump physics
+        if (this.keys['Space'] && this.player.z <= this.player.groundZ + 1) {
+            this.player.velocityZ = this.player.jumpStrength;
+        }
+        this.player.velocityZ -= this.player.gravity;
+        this.player.z += this.player.velocityZ;
+        if (this.player.z <= this.player.groundZ) {
+            this.player.z = this.player.groundZ;
+            this.player.velocityZ = 0;
+        }
     }
 
     draw() {
@@ -363,15 +389,18 @@ class Game {
         const H = this.displayHeight;
         const halfH = H / 2;
 
-        // Clear
-        ctx.fillStyle = '#000';
+        // Clear with floor color as base (prevents gaps when jumping)
+        const horizonY = halfH + this.pitch;
+        const floorGrad = ctx.createLinearGradient(0, halfH, 0, H);
+        floorGrad.addColorStop(0, '#4a4035');
+        floorGrad.addColorStop(1, '#2a2015');
+        ctx.fillStyle = floorGrad;
         ctx.fillRect(0, 0, W, H);
 
-        // Draw sky - fixed height with clipping (like tiny-village-survive)
+        // Draw sky on top - fixed height with clipping
         if (this.skyImage) {
             const skyW = this.skyImage.width;
             const skyH = this.skyImage.height;
-            const horizonY = halfH + this.pitch;
 
             // Fixed sky height (doesn't stretch with pitch)
             const fixedSkyHeight = H * 0.95;
@@ -408,21 +437,20 @@ class Game {
             }
         }
 
-        // Floor color - gradient for depth effect
-        const floorGrad = ctx.createLinearGradient(0, halfH + this.pitch, 0, H);
-        floorGrad.addColorStop(0, '#4a4035');
-        floorGrad.addColorStop(1, '#2a2015');
-        ctx.fillStyle = floorGrad;
-        ctx.fillRect(0, halfH + this.pitch, W, H - halfH - this.pitch);
-
         // Reset z-buffer
         this.zBuffer.fill(Infinity);
 
         // Cast rays and draw walls
+        const cameraZ = this.TILE_SIZE / 2 + this.player.z;
+        const horizon = halfH + this.pitch;
+        // Only use multi-hit when jumping (performance optimization)
+        const canSeeOverWalls = this.player.z > 5;
+
         for (let strip = 0; strip < this.numRays; strip++) {
             const screenX = (this.numRays / 2 - strip) * this.stripWidth;
             const stripAngle = Math.atan(screenX / this.viewDist);
             const rayAngle = this.player.rot + stripAngle;
+            const drawX = strip * this.stripWidth;
 
             let angle = rayAngle;
             while (angle < 0) angle += TWO_PI;
@@ -432,7 +460,9 @@ class Game {
             const up = angle < Math.PI;
             const tanA = Math.tan(rayAngle);
 
-            let hitDist = Infinity, hitHoriz = false, hitType = 0, hitTexX = 0;
+            // Collect wall hits (all hits when jumping, first hit when on ground)
+            const hits = [];
+            let foundFirst = false;
 
             // Vertical intersections
             const vStepX = right ? this.TILE_SIZE : -this.TILE_SIZE;
@@ -449,17 +479,14 @@ class Game {
 
                 const wall = this.raycaster.cellAt(cx, cy, 0);
                 if (wall > 0 && !Raycaster.isHorizontalDoor(wall)) {
-                    if (Raycaster.isDoor(wall) && this.doors[cx + cy * MAP_WIDTH]) {
-                        vx += vStepX; vy += vStepY; continue;
+                    if (!(Raycaster.isDoor(wall) && this.doors[cx + cy * MAP_WIDTH])) {
+                        const dx = vx - this.player.x, dy = vy - this.player.y;
+                        const dist = Math.sqrt(dx*dx + dy*dy);
+                        let texX = vy % this.TILE_SIZE;
+                        if (!right) texX = this.TILE_SIZE - texX;
+                        hits.push({ dist, horiz: false, type: wall, texX });
+                        if (!canSeeOverWalls) { foundFirst = true; break; }
                     }
-                    const dx = vx - this.player.x, dy = vy - this.player.y;
-                    const dist = Math.sqrt(dx*dx + dy*dy);
-                    if (dist < hitDist) {
-                        hitDist = dist; hitHoriz = false; hitType = wall;
-                        hitTexX = vy % this.TILE_SIZE;
-                        if (!right) hitTexX = this.TILE_SIZE - hitTexX;
-                    }
-                    break;
                 }
                 vx += vStepX; vy += vStepY;
             }
@@ -479,72 +506,95 @@ class Game {
 
                 const wall = this.raycaster.cellAt(cx, cy, 0);
                 if (wall > 0 && !Raycaster.isVerticalDoor(wall)) {
-                    if (Raycaster.isDoor(wall) && this.doors[cx + cy * MAP_WIDTH]) {
-                        hx += hStepX; hy += hStepY; continue;
+                    if (!(Raycaster.isDoor(wall) && this.doors[cx + cy * MAP_WIDTH])) {
+                        const dx = hx - this.player.x, dy = hy - this.player.y;
+                        const dist = Math.sqrt(dx*dx + dy*dy);
+                        let texX = hx % this.TILE_SIZE;
+                        if (!up) texX = this.TILE_SIZE - texX;
+                        hits.push({ dist, horiz: true, type: wall, texX });
+                        if (!canSeeOverWalls && foundFirst) break;
+                        if (!canSeeOverWalls) { foundFirst = true; break; }
                     }
-                    const dx = hx - this.player.x, dy = hy - this.player.y;
-                    const dist = Math.sqrt(dx*dx + dy*dy);
-                    if (dist < hitDist) {
-                        hitDist = dist; hitHoriz = true; hitType = wall;
-                        hitTexX = hx % this.TILE_SIZE;
-                        if (!up) hitTexX = this.TILE_SIZE - hitTexX;
-                    }
-                    break;
                 }
                 hx += hStepX; hy += hStepY;
             }
 
-            // Draw wall strip
-            if (hitDist < Infinity && hitType > 0) {
-                const correctDist = hitDist * Math.cos(stripAngle);
-                const wallH = Math.floor(this.viewDist / correctDist * this.TILE_SIZE);
+            // Sort hits by distance (near to far)
+            hits.sort((a, b) => a.dist - b.dist);
 
-                const yStart = halfH - wallH / 2 + this.pitch;
-                const yEnd = halfH + wallH / 2 + this.pitch;
-                const drawX = strip * this.stripWidth;
+            // Track filled Y positions for this column
+            let minFilledY = H;
 
-                // Store z-buffer
-                for (let sx = drawX; sx < drawX + this.stripWidth && sx < W; sx++) {
-                    this.zBuffer[sx] = correctDist;
+            // Process hits from near to far
+            for (const hit of hits) {
+                const correctDist = hit.dist * Math.cos(stripAngle);
+                const projScale = this.viewDist / correctDist;
+
+                // Wall bottom at floor level (z=0), wall top at TILE_SIZE height
+                const wallBottom = horizon + cameraZ * projScale;
+                const wallTop = horizon + (cameraZ - this.TILE_SIZE) * projScale;
+
+                // Clamp to screen bounds
+                const yStart = Math.max(0, Math.floor(wallTop));
+                const yEnd = Math.min(H, Math.ceil(wallBottom));
+
+                // Only draw if this wall would show above previously drawn walls
+                if (yStart >= minFilledY) continue;
+
+                // Only draw the portion above what's already filled
+                const drawYEnd = Math.min(yEnd, minFilledY);
+
+                // Store z-buffer for closest hit
+                if (minFilledY === H) {
+                    for (let sx = drawX; sx < drawX + this.stripWidth && sx < W; sx++) {
+                        this.zBuffer[sx] = correctDist;
+                    }
                 }
 
                 // Get texture coordinates
-                let tex = hitHoriz ? this.wallsImageDark : this.wallsImage;
-
-                // Calculate texture X position within the tile (scale to TEXTURE_SIZE, not full atlas)
-                // C++ uses: sx = tileX / TILE_SIZE * TEXTURE_SIZE (maps 0-64 to 0-128)
-                let tileTexX = Math.floor(hitTexX / this.TILE_SIZE * this.TEXTURE_SIZE);
+                let tex = hit.horiz ? this.wallsImageDark : this.wallsImage;
+                let tileTexX = Math.floor(hit.texX / this.TILE_SIZE * this.TEXTURE_SIZE);
                 if (tileTexX >= this.TEXTURE_SIZE) tileTexX = this.TEXTURE_SIZE - 1;
 
                 let srcX, srcY, srcH;
 
-                if (Raycaster.isDoor(hitType)) {
+                if (Raycaster.isDoor(hit.type)) {
                     tex = this.gatesImage;
                     srcX = tileTexX % tex.width;
                     srcY = 0;
                     srcH = tex.height;
                 } else {
-                    // Atlas is VERTICAL: 64x256 (4 textures of 64x64 stacked vertically)
-                    // Wall types 1-4 map to rows 0-3 in the atlas
-                    const wallIndex = (hitType - 1) % 4;
+                    const wallIndex = (hit.type - 1) % 4;
                     srcX = tileTexX;
                     srcY = wallIndex * this.TEXTURE_SIZE;
                     srcH = this.TEXTURE_SIZE;
                 }
 
-                // Draw wall strip
-                ctx.drawImage(
-                    tex,
-                    srcX, srcY, 1, srcH,
-                    drawX, yStart, this.stripWidth, yEnd - yStart
-                );
+                // Calculate source Y for partial wall drawing
+                const wallHeight = wallBottom - wallTop;
+                const srcYOffset = ((yStart - wallTop) / wallHeight) * srcH;
+                const srcYEnd = ((drawYEnd - wallTop) / wallHeight) * srcH;
+                const srcDrawH = srcYEnd - srcYOffset;
 
-                // Distance shading
-                const shade = Math.min(correctDist / (this.TILE_SIZE * 10), 0.6);
-                if (shade > 0.05) {
-                    ctx.fillStyle = `rgba(0,0,0,${shade})`;
-                    ctx.fillRect(drawX, yStart, this.stripWidth, yEnd - yStart);
+                // Draw wall strip (only visible portion)
+                if (srcDrawH > 0 && drawYEnd > yStart) {
+                    ctx.drawImage(
+                        tex,
+                        srcX, srcY + srcYOffset, 1, srcDrawH,
+                        drawX, yStart, this.stripWidth, drawYEnd - yStart
+                    );
+
+                    // Distance shading
+                    const shade = Math.min(correctDist / (this.TILE_SIZE * 10), 0.6);
+                    if (shade > 0.05) {
+                        ctx.fillStyle = `rgba(0,0,0,${shade})`;
+                        ctx.fillRect(drawX, yStart, this.stripWidth, drawYEnd - yStart);
+                    }
                 }
+
+                // Update minimum filled Y (early exit if screen column is full)
+                minFilledY = Math.min(minFilledY, yStart);
+                if (minFilledY <= 0) break;
             }
         }
 
@@ -587,10 +637,19 @@ class Game {
             const tex = this.spriteImages[sprite.type] || this.spriteImages.barrel;
             if (!tex) continue;
 
+            // Height-based projection (same as walls)
+            const projScale = this.viewDist / dist;
+            const horizon = halfH + this.pitch;
+            const cameraZ = this.TILE_SIZE / 2 + this.player.z;
+
+            // Sprite bottom at floor (z=0), sprite top at sprite.h
+            const spriteBottom = horizon + cameraZ * projScale;
+            const spriteTop = horizon + (cameraZ - sprite.h) * projScale;
+
             const screenX = this.displayWidth / 2 + Math.tan(angleDiff) * this.viewDist;
-            const size = Math.floor(this.viewDist / dist * sprite.h);
+            const size = Math.floor(spriteBottom - spriteTop);
             const drawX = Math.floor(screenX - size / 2);
-            const drawY = Math.floor(halfH - size / 2 + this.pitch);
+            const drawY = Math.floor(spriteTop);
 
             // Simple z-buffer check (center of sprite)
             const centerX = Math.floor(screenX);

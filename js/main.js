@@ -12,5 +12,5 @@ window.addEventListener('DOMContentLoaded', async () => {
     await game.start();
 
     console.log('Game started!');
-    console.log('Controls: Click=Mouse Look, WASD=Move/Strafe, F=Doors, M=Minimap, ESC=Release');
+    console.log('Controls: Click=Mouse Look, WASD=Move/Strafe, Space=Jump, F=Doors, M=Minimap, ESC=Release');
 });
