@@ -3,7 +3,7 @@
  * Ported from Andrew Lim's SDL2 Raycasting Engine
  */
 
-const GITHUB_RAW = 'https://raw.githubusercontent.com/andrew-lim/sdl2-raycast/master/res/';
+const ASSETS_PATH = 'assets/';
 
 class Game {
     constructor() {
@@ -120,34 +120,34 @@ class Game {
 
     async loadTextures() {
         try {
-            console.log('Loading textures from GitHub...');
+            console.log('Loading textures...');
 
             // Load wall textures (texture atlas - vertical 64x256)
-            this.wallsImage = await this.loadImage(GITHUB_RAW + 'walls4.bmp');
-            this.wallsImageDark = await this.loadImage(GITHUB_RAW + 'walls4dark.bmp');
+            this.wallsImage = await this.loadImage(ASSETS_PATH + 'walls4.bmp');
+            this.wallsImageDark = await this.loadImage(ASSETS_PATH + 'walls4dark.bmp');
             console.log(`Wall atlas (light): ${this.wallsImage.width}x${this.wallsImage.height}`);
             console.log(`Wall atlas (dark): ${this.wallsImageDark.width}x${this.wallsImageDark.height}`);
 
             // Load floor/ceiling
-            this.floorImage = await this.loadImage(GITHUB_RAW + 'mossycobble.bmp');
-            this.ceilingImage = await this.loadImage(GITHUB_RAW + 'default_brick.bmp');
+            this.floorImage = await this.loadImage(ASSETS_PATH + 'mossycobble.bmp');
+            this.ceilingImage = await this.loadImage(ASSETS_PATH + 'default_brick.bmp');
 
             // Load sky (use night sky image with horizontal flip for seamless wrapping)
-            const skyImg = await this.loadImage('assets/night_sky_2.png');
+            const skyImg = await this.loadImage(ASSETS_PATH + 'night_sky_2.png');
             this.skyImage = this.createSeamlessSky(skyImg);
 
             // Load sprites and remove magenta background
-            let spriteImg = await this.loadImage(GITHUB_RAW + 'tree.bmp');
+            let spriteImg = await this.loadImage(ASSETS_PATH + 'tree.bmp');
             this.spriteImages.barrel = this.makeTransparent(spriteImg);
 
-            spriteImg = await this.loadImage(GITHUB_RAW + 'skeleton.bmp');
+            spriteImg = await this.loadImage(ASSETS_PATH + 'skeleton.bmp');
             this.spriteImages.enemy1 = this.makeTransparent(spriteImg);
 
-            spriteImg = await this.loadImage(GITHUB_RAW + 'druid.bmp');
+            spriteImg = await this.loadImage(ASSETS_PATH + 'druid.bmp');
             this.spriteImages.enemy2 = this.makeTransparent(spriteImg);
 
             // Load door
-            this.gatesImage = await this.loadImage(GITHUB_RAW + 'gates.bmp');
+            this.gatesImage = await this.loadImage(ASSETS_PATH + 'gates.bmp');
 
             console.log('All textures loaded!');
             this.texturesLoaded = true;
