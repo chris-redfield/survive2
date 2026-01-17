@@ -163,8 +163,9 @@ class Game {
             spriteImg = await this.loadImage(ASSETS_PATH + 'druid.bmp');
             this.spriteImages.enemy2 = this.makeTransparent(spriteImg);
 
-            // Load door
-            this.gatesImage = await this.loadImage(ASSETS_PATH + 'gates.bmp');
+            // Load door and remove magenta background
+            const gatesImg = await this.loadImage(ASSETS_PATH + 'gates.bmp');
+            this.gatesImage = this.makeTransparent(gatesImg);
 
             console.log('All textures loaded!');
             this.texturesLoaded = true;
@@ -560,19 +561,23 @@ class Game {
                         hits.push({ dist: crossDist, horiz: !crossVertical, type: prevWalls[level], texX, level });
                     }
 
-                    prevWalls[level] = isSolid ? wall : 0;
+                    // For doors, keep prevWalls as 0 so walls behind them are detected
+                    // This allows the ray to register walls behind transparent doors
+                    prevWalls[level] = (isSolid && !Raycaster.isDoor(wall)) ? wall : 0;
                 }
 
                 // Break if we hit a solid wall at ground level and can't see over
+                // Continue past all doors (open or closed) to render walls behind transparent parts
                 const groundWall = this.raycaster.cellAt(cx, cy, 0);
-                const groundSolid = groundWall > 0 && !(Raycaster.isDoor(groundWall) && this.doors[cellKey]);
+                const groundSolid = groundWall > 0 && !Raycaster.isDoor(groundWall);
                 if (groundSolid && !canSeeOverWalls) break;
             }
 
-            // Sort hits by distance (near to far), then by level (high to low)
-            // This ensures upper level walls at the same distance are processed first
+            // Sort hits by distance (far to near) like the original C++ code
+            // Far walls render first, then near walls render on top
+            // This allows transparent door pixels to show walls behind
             hits.sort((a, b) => {
-                if (a.dist !== b.dist) return a.dist - b.dist;
+                if (a.dist !== b.dist) return b.dist - a.dist; // Far to near
                 return (b.level || 0) - (a.level || 0); // Higher levels first
             });
 
@@ -582,12 +587,9 @@ class Game {
                 console.log(`Center ray hits: ${debugHits}`);
             }
 
-            // Track filled Y ranges for this column
-            // For multi-level walls, we need to track both top and bottom of filled region
-            let minFilledY = H;   // Topmost filled Y (starts at bottom = nothing filled)
-            let maxFilledY = 0;   // Bottommost filled Y (starts at top = nothing filled)
-
-            // Process hits from near to far
+            // Process hits from far to near (painter's algorithm)
+            // Far walls render first, then near walls overwrite them
+            // This allows transparent door pixels to show walls behind
             for (const hit of hits) {
                 const correctDist = hit.dist * Math.cos(stripAngle);
                 const projScale = this.viewDist / correctDist;
@@ -606,28 +608,16 @@ class Game {
                 // Skip walls that are entirely off-screen
                 if (yEnd <= 0 || yStart >= H) continue;
 
-                // Skip walls that are entirely within the already-filled region
-                // For multi-level: a wall might be above OR below the filled region
-                if (yStart >= minFilledY && yEnd <= maxFilledY) continue;
+                const hitIsDoor = Raycaster.isDoor(hit.type);
 
-                // Calculate the drawable portion (excluding already-filled areas)
-                let drawYStart = yStart;
-                let drawYEnd = yEnd;
-
-                // If this wall overlaps with filled region, clip it
-                if (yStart < minFilledY && yEnd > minFilledY) {
-                    // Wall extends above filled region - only draw the top part
-                    drawYEnd = Math.min(yEnd, minFilledY);
-                }
-                if (yStart < maxFilledY && yEnd > maxFilledY) {
-                    // Wall extends below filled region - only draw the bottom part
-                    drawYStart = Math.max(yStart, maxFilledY);
-                }
+                // With far-to-near rendering, no clipping needed - near walls overwrite far ones
+                const drawYStart = yStart;
+                const drawYEnd = yEnd;
 
                 // Store z-buffer for sprites - use walls that extend to/below horizon
                 // (where ground-level sprites appear)
                 // This prevents upper-level walls (entirely above horizon) from blocking ground sprites
-                // but still blocks sprites behind ground-level walls
+                // Doors now set z-buffer to properly block sprites behind them
                 if (drawYEnd >= horizon) {
                     for (let sx = drawX; sx < drawX + this.stripWidth && sx < W; sx++) {
                         if (correctDist < this.zBuffer[sx]) {
@@ -675,13 +665,6 @@ class Game {
                         ctx.fillStyle = `rgba(0,0,0,${shade})`;
                         ctx.fillRect(drawX, drawYStart, this.stripWidth, drawYEnd - drawYStart);
                     }
-
-                    // Update filled region tracking
-                    minFilledY = Math.min(minFilledY, drawYStart);
-                    maxFilledY = Math.max(maxFilledY, drawYEnd);
-
-                    // Early exit if entire column is filled
-                    if (minFilledY <= 0 && maxFilledY >= H) break;
                 }
             }
         }
