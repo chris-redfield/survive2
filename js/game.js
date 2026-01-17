@@ -52,6 +52,8 @@ class Game {
         this.zBuffer = new Float32Array(this.displayWidth);
         this.texturesLoaded = false;
 
+        this.DEBUG_MODE = false;  // Set to true to enable debug logging
+
         this.fps = 0;
         this.frameCount = 0;
         this.lastFpsTime = 0;
@@ -490,10 +492,14 @@ class Game {
                 tMaxY = Infinity;
             }
 
-            // Check if starting cell is a wall
-            const startWall = this.raycaster.cellAt(cx, cy, 0);
+            // Check if starting cell is a wall (for each level)
             const startKey = cx + cy * MAP_WIDTH;
-            let prevWall = (startWall > 0 && !(Raycaster.isDoor(startWall) && this.doors[startKey])) ? startWall : 0;
+            const numLevels = this.raycaster.grids.length;
+            let prevWalls = [];
+            for (let level = 0; level < numLevels; level++) {
+                const startWall = this.raycaster.cellAt(cx, cy, level);
+                prevWalls[level] = (startWall > 0 && !(Raycaster.isDoor(startWall) && this.doors[startKey])) ? startWall : 0;
+            }
 
             // DDA stepping - continue until we exit the map or hit a wall
             while (true) {
@@ -517,73 +523,116 @@ class Game {
                 // Bounds check - exit when ray leaves the map
                 if (cx < 0 || cx >= MAP_WIDTH || cy < 0 || cy >= MAP_HEIGHT) break;
 
-                // Check new cell
-                const wall = this.raycaster.cellAt(cx, cy, 0);
+                // Check walls at all levels (0 = ground, 1 = upper)
                 const cellKey = cx + cy * MAP_WIDTH;
-                const isOpenDoor = Raycaster.isDoor(wall) && this.doors[cellKey];
-                const isSolid = wall > 0 && !isOpenDoor;
+                const numLevels = this.raycaster.grids.length;
 
-                // Front face: entering wall from empty space
-                if (isSolid && prevWall === 0) {
-                    let texX;
-                    if (crossVertical) {
-                        // Crossed a vertical boundary (east/west face)
-                        texX = ((hitY % this.TILE_SIZE) + this.TILE_SIZE) % this.TILE_SIZE;
-                        if (stepX < 0) texX = this.TILE_SIZE - texX;
-                    } else {
-                        // Crossed a horizontal boundary (north/south face)
-                        texX = ((hitX % this.TILE_SIZE) + this.TILE_SIZE) % this.TILE_SIZE;
-                        if (stepY > 0) texX = this.TILE_SIZE - texX;
+                for (let level = 0; level < numLevels; level++) {
+                    const wall = this.raycaster.cellAt(cx, cy, level);
+                    const isOpenDoor = Raycaster.isDoor(wall) && this.doors[cellKey];
+                    const isSolid = wall > 0 && !isOpenDoor;
+
+                    // Front face: entering wall from empty space
+                    if (isSolid && prevWalls[level] === 0) {
+                        let texX;
+                        if (crossVertical) {
+                            // Crossed a vertical boundary (east/west face)
+                            texX = ((hitY % this.TILE_SIZE) + this.TILE_SIZE) % this.TILE_SIZE;
+                            if (stepX < 0) texX = this.TILE_SIZE - texX;
+                        } else {
+                            // Crossed a horizontal boundary (north/south face)
+                            texX = ((hitX % this.TILE_SIZE) + this.TILE_SIZE) % this.TILE_SIZE;
+                            if (stepY > 0) texX = this.TILE_SIZE - texX;
+                        }
+                        hits.push({ dist: crossDist, horiz: !crossVertical, type: wall, texX, level });
                     }
-                    hits.push({ dist: crossDist, horiz: !crossVertical, type: wall, texX });
-                    if (!canSeeOverWalls) break;
+
+                    // Back face: exiting wall into empty space
+                    if (!isSolid && prevWalls[level] > 0 && canSeeOverWalls) {
+                        let texX;
+                        if (crossVertical) {
+                            texX = ((hitY % this.TILE_SIZE) + this.TILE_SIZE) % this.TILE_SIZE;
+                            if (stepX > 0) texX = this.TILE_SIZE - texX;
+                        } else {
+                            texX = ((hitX % this.TILE_SIZE) + this.TILE_SIZE) % this.TILE_SIZE;
+                            if (stepY < 0) texX = this.TILE_SIZE - texX;
+                        }
+                        hits.push({ dist: crossDist, horiz: !crossVertical, type: prevWalls[level], texX, level });
+                    }
+
+                    prevWalls[level] = isSolid ? wall : 0;
                 }
 
-                // Back face: exiting wall into empty space
-                if (!isSolid && prevWall > 0 && canSeeOverWalls) {
-                    let texX;
-                    if (crossVertical) {
-                        texX = ((hitY % this.TILE_SIZE) + this.TILE_SIZE) % this.TILE_SIZE;
-                        if (stepX > 0) texX = this.TILE_SIZE - texX;
-                    } else {
-                        texX = ((hitX % this.TILE_SIZE) + this.TILE_SIZE) % this.TILE_SIZE;
-                        if (stepY < 0) texX = this.TILE_SIZE - texX;
-                    }
-                    hits.push({ dist: crossDist, horiz: !crossVertical, type: prevWall, texX });
-                }
-
-                prevWall = isSolid ? wall : 0;
+                // Break if we hit a solid wall at ground level and can't see over
+                const groundWall = this.raycaster.cellAt(cx, cy, 0);
+                const groundSolid = groundWall > 0 && !(Raycaster.isDoor(groundWall) && this.doors[cellKey]);
+                if (groundSolid && !canSeeOverWalls) break;
             }
 
-            // Sort hits by distance (near to far)
-            hits.sort((a, b) => a.dist - b.dist);
+            // Sort hits by distance (near to far), then by level (high to low)
+            // This ensures upper level walls at the same distance are processed first
+            hits.sort((a, b) => {
+                if (a.dist !== b.dist) return a.dist - b.dist;
+                return (b.level || 0) - (a.level || 0); // Higher levels first
+            });
 
-            // Track filled Y positions for this column
-            let minFilledY = H;
+            // DEBUG: Log hits for center strip (only when DEBUG_MODE is true)
+            if (this.DEBUG_MODE && strip === Math.floor(this.numRays / 2) && hits.length > 0 && this.frameCount % 60 === 0) {
+                const debugHits = hits.map(h => `L${h.level}@${h.dist.toFixed(0)}`).join(', ');
+                console.log(`Center ray hits: ${debugHits}`);
+            }
+
+            // Track filled Y ranges for this column
+            // For multi-level walls, we need to track both top and bottom of filled region
+            let minFilledY = H;   // Topmost filled Y (starts at bottom = nothing filled)
+            let maxFilledY = 0;   // Bottommost filled Y (starts at top = nothing filled)
 
             // Process hits from near to far
             for (const hit of hits) {
                 const correctDist = hit.dist * Math.cos(stripAngle);
                 const projScale = this.viewDist / correctDist;
 
-                // Wall bottom at floor level (z=0), wall top at TILE_SIZE height
-                const wallBottom = horizon + cameraZ * projScale;
-                const wallTop = horizon + (cameraZ - this.TILE_SIZE) * projScale;
+                // Wall position based on level (level 0 = ground, level 1 = upper, etc.)
+                const level = hit.level || 0;
+                const levelBottom = level * this.TILE_SIZE;
+                const levelTop = (level + 1) * this.TILE_SIZE;
+                const wallBottom = horizon + (cameraZ - levelBottom) * projScale;
+                const wallTop = horizon + (cameraZ - levelTop) * projScale;
 
                 // Clamp to screen bounds
                 const yStart = Math.max(0, Math.floor(wallTop));
                 const yEnd = Math.min(H, Math.ceil(wallBottom));
 
-                // Only draw if this wall would show above previously drawn walls
-                if (yStart >= minFilledY) continue;
+                // Skip walls that are entirely off-screen
+                if (yEnd <= 0 || yStart >= H) continue;
 
-                // Only draw the portion above what's already filled
-                const drawYEnd = Math.min(yEnd, minFilledY);
+                // Skip walls that are entirely within the already-filled region
+                // For multi-level: a wall might be above OR below the filled region
+                if (yStart >= minFilledY && yEnd <= maxFilledY) continue;
 
-                // Store z-buffer for closest hit
-                if (minFilledY === H) {
+                // Calculate the drawable portion (excluding already-filled areas)
+                let drawYStart = yStart;
+                let drawYEnd = yEnd;
+
+                // If this wall overlaps with filled region, clip it
+                if (yStart < minFilledY && yEnd > minFilledY) {
+                    // Wall extends above filled region - only draw the top part
+                    drawYEnd = Math.min(yEnd, minFilledY);
+                }
+                if (yStart < maxFilledY && yEnd > maxFilledY) {
+                    // Wall extends below filled region - only draw the bottom part
+                    drawYStart = Math.max(yStart, maxFilledY);
+                }
+
+                // Store z-buffer for sprites - use walls that extend to/below horizon
+                // (where ground-level sprites appear)
+                // This prevents upper-level walls (entirely above horizon) from blocking ground sprites
+                // but still blocks sprites behind ground-level walls
+                if (drawYEnd >= horizon) {
                     for (let sx = drawX; sx < drawX + this.stripWidth && sx < W; sx++) {
-                        this.zBuffer[sx] = correctDist;
+                        if (correctDist < this.zBuffer[sx]) {
+                            this.zBuffer[sx] = correctDist;
+                        }
                     }
                 }
 
@@ -608,29 +657,32 @@ class Game {
 
                 // Calculate source Y for partial wall drawing
                 const wallHeight = wallBottom - wallTop;
-                const srcYOffset = ((yStart - wallTop) / wallHeight) * srcH;
-                const srcYEnd = ((drawYEnd - wallTop) / wallHeight) * srcH;
-                const srcDrawH = srcYEnd - srcYOffset;
+                const srcYOffset = ((drawYStart - wallTop) / wallHeight) * srcH;
+                const srcYEndCalc = ((drawYEnd - wallTop) / wallHeight) * srcH;
+                const srcDrawH = srcYEndCalc - srcYOffset;
 
                 // Draw wall strip (only visible portion)
-                if (srcDrawH > 0 && drawYEnd > yStart) {
+                if (srcDrawH > 0 && drawYEnd > drawYStart) {
                     ctx.drawImage(
                         tex,
                         srcX, srcY + srcYOffset, 1, srcDrawH,
-                        drawX, yStart, this.stripWidth, drawYEnd - yStart
+                        drawX, drawYStart, this.stripWidth, drawYEnd - drawYStart
                     );
 
                     // Distance shading
                     const shade = Math.min(correctDist / (this.TILE_SIZE * 10), 0.6);
                     if (shade > 0.05) {
                         ctx.fillStyle = `rgba(0,0,0,${shade})`;
-                        ctx.fillRect(drawX, yStart, this.stripWidth, drawYEnd - yStart);
+                        ctx.fillRect(drawX, drawYStart, this.stripWidth, drawYEnd - drawYStart);
                     }
-                }
 
-                // Update minimum filled Y (early exit if screen column is full)
-                minFilledY = Math.min(minFilledY, yStart);
-                if (minFilledY <= 0) break;
+                    // Update filled region tracking
+                    minFilledY = Math.min(minFilledY, drawYStart);
+                    maxFilledY = Math.max(maxFilledY, drawYEnd);
+
+                    // Early exit if entire column is filled
+                    if (minFilledY <= 0 && maxFilledY >= H) break;
+                }
             }
         }
 
