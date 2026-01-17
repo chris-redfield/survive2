@@ -705,8 +705,11 @@ class Game {
                     if (screenX < W) {
                         const rayOffset = (W / 2 - screenX) / this.viewDist;
                         const rayAngle = this.player.rot + Math.atan(rayOffset);
-                        const worldX = this.player.x + rowDist * Math.cos(rayAngle);
-                        const worldY = this.player.y - rowDist * Math.sin(rayAngle);
+                        // Fish-eye correction: rays at screen edges travel further
+                        const cosAngle = Math.cos(rayAngle - this.player.rot);
+                        const correctedDist = rowDist / cosAngle;
+                        const worldX = this.player.x + correctedDist * Math.cos(rayAngle);
+                        const worldY = this.player.y - correctedDist * Math.sin(rayAngle);
                         const cellX = Math.floor(worldX / this.TILE_SIZE);
                         const cellY = Math.floor(worldY / this.TILE_SIZE);
 
