@@ -347,3 +347,16 @@ Wall tops are HORIZONTAL surfaces like the FLOOR/GROUND. They must be rendered w
 - Wall tops are HORIZONTAL surfaces - must be rendered with horizontal scanlines, NOT vertical strips
 - Column-based approaches will always look like walls growing upward
 - Span batching is crucial for performance - reduces draw calls from hundreds to just a few per row
+
+## Bug Fix: Fish-eye curved edges
+**Problem**: Wall tops had curved edges at the left and right corners of the screen - they curved upward instead of being straight.
+
+**Cause**: We used the same `rowDist` for all pixels in a row, but rays at the screen edges travel at an angle. Without correction, edge pixels project to incorrect world positions.
+
+**Solution**: Apply fish-eye correction for each pixel:
+```javascript
+const cosAngle = Math.cos(rayAngle - this.player.rot);
+const correctedDist = rowDist / cosAngle;
+```
+
+**Result**: Wall tops now have perfectly straight edges across the entire screen.
