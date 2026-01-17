@@ -495,7 +495,8 @@ class Game {
             const startKey = cx + cy * MAP_WIDTH;
             let prevWall = (startWall > 0 && !(Raycaster.isDoor(startWall) && this.doors[startKey])) ? startWall : 0;
 
-            for (let i = 0; i < 30; i++) {
+            // DDA stepping - continue until we exit the map or hit a wall
+            while (true) {
                 // Which boundary is closer?
                 const crossVertical = tMaxX < tMaxY;
                 const crossDist = crossVertical ? tMaxX : tMaxY;
@@ -513,7 +514,7 @@ class Game {
                     tMaxY += tDeltaY;
                 }
 
-                // Bounds check
+                // Bounds check - exit when ray leaves the map
                 if (cx < 0 || cx >= MAP_WIDTH || cy < 0 || cy >= MAP_HEIGHT) break;
 
                 // Check new cell
