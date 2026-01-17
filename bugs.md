@@ -249,3 +249,101 @@ We may have a Y-axis direction mismatch between:
 3. **Offscreen canvas**: Pre-render wall tops to a texture for better performance
 4. **Skip sameWall entirely**: Just render based on distance limits (may cause artifacts but might work)
 5. **Debug visualization**: Draw the projected points on the minimap to see where they land
+
+---
+
+# Session 2 - Claude's New Attempts
+
+## Attempt 11: Per-pixel ctx.drawImage with distance bounds
+**Changes**:
+- Loop from wallTop toward horizon
+- Project each screenY to world position on horizontal plane at wallTopWorld height
+- Use distance bounds (correctDist to correctDist + TILE_SIZE*1.5) instead of sameWall check
+- Sample ceiling texture and draw with ctx.drawImage(1x1 pixel)
+
+**Result**: Wall tops appear and geometry looks correct, BUT FPS dropped to 4 (from 60). Completely unusable.
+
+**Root cause**: ctx.drawImage for every single pixel is extremely slow, even worse than fillRect per pixel.
+
+## Attempt 12: Single fillRect per strip with calculated far edge
+**Changes**:
+- Calculate near edge (at wall, screenY = wallTop) and far edge (at correctDist + TILE_SIZE)
+- Draw single solid color rectangle from farScreenY to nearScreenY
+- No per-pixel loop
+
+**Result**: Good FPS (61), but wall tops extend WAY too far. Instead of small horizontal strips on top of walls, huge triangular areas fill from walls toward horizon.
+
+**Root cause**: The far edge calculation `farDist = correctDist + TILE_SIZE` doesn't account for actual cell geometry. Without per-pixel sameWall checking, the wall top extends beyond its cell boundaries. The simple rectangle approach fills the ENTIRE area between horizon and wall top, not just the actual wall cell surface.
+
+## Key Insight from Attempt 12:
+The problem is fundamental: a wall top is a horizontal surface that should only render within its specific cell. Without per-pixel cell checking, we can't know where the cell boundaries project to on screen. But per-pixel checking is too slow.
+
+**Possible solutions**:
+1. Calculate actual cell corner projections to bound the wall top
+2. Use a fixed/proportional wall top height (hack but fast)
+3. Pre-calculate cell projections and cache them
+4. Use WebGL for proper perspective texture mapping
+
+---
+
+# CRITICAL REMINDER (DO NOT FORGET):
+
+WE DO NOT WANT VERTICAL STRIPS ON TOP OF WALLS, WE WANT A GROUND SURFACE on top of them
+WE DO NOT WANT VERTICAL STRIPS ON TOP OF WALLS, WE WANT A GROUND SURFACE on top of them
+WE DO NOT WANT VERTICAL STRIPS ON TOP OF WALLS, WE WANT A GROUND SURFACE on top of them
+WE DO NOT WANT VERTICAL STRIPS ON TOP OF WALLS, WE WANT A GROUND SURFACE on top of them
+WE DO NOT WANT VERTICAL STRIPS ON TOP OF WALLS, WE WANT A GROUND SURFACE on top of them
+WE DO NOT WANT VERTICAL STRIPS ON TOP OF WALLS, WE WANT A GROUND SURFACE on top of them
+WE DO NOT WANT VERTICAL STRIPS ON TOP OF WALLS, WE WANT A GROUND SURFACE on top of them
+WE DO NOT WANT VERTICAL STRIPS ON TOP OF WALLS, WE WANT A GROUND SURFACE on top of them
+WE DO NOT WANT VERTICAL STRIPS ON TOP OF WALLS, WE WANT A GROUND SURFACE on top of them
+WE DO NOT WANT VERTICAL STRIPS ON TOP OF WALLS, WE WANT A GROUND SURFACE on top of them
+
+Wall tops are HORIZONTAL surfaces like the FLOOR/GROUND. They must be rendered with HORIZONTAL SCANLINES (row by row), NOT vertical strips (column by column). The approach must be like floor rendering, not wall rendering.
+
+---
+
+## Attempt 13: Horizontal scanline rendering (WORKS!)
+**Changes**:
+- Completely different approach: render wall tops AFTER all walls, using horizontal scanlines
+- For each screen ROW from horizon downward:
+  - Calculate distance for this row on the wall-top plane: `rowDist = (cameraZ - wallTopHeight) * viewDist / (screenY - horizon)`
+  - For each pixel in the row, calculate world position using ray angle
+  - Check if position is inside a wall cell
+  - If yes, draw the pixel
+
+**Result**: IT WORKS! Wall tops render as proper horizontal surfaces, like the ground. They look correct from all angles.
+
+**Problem**: Performance hit (FPS drops from 60 to ~43) due to per-pixel processing.
+
+**Key insight**: Wall tops MUST be rendered row-by-row (horizontal scanlines) like floor rendering, NOT column-by-column like wall rendering. Any column-based approach will look like vertical strips growing upward.
+
+## Attempt 14: Span batching optimization (SUCCESS!)
+**Changes**:
+- Instead of `fillRect` per pixel, batch continuous spans of wall-top pixels
+- For each row, track where wall-top spans start and end
+- Draw entire spans with single `fillRect` calls
+- Calculate color once per row instead of per pixel
+
+**Result**: FPS is now 61 at all times! No performance drop!
+
+**Why it works**:
+- Instead of potentially hundreds of `fillRect` calls per row (one per pixel), we now make just a few calls per row (one per continuous span)
+- Example: a row with wall tops at X: 100-200 and 350-400 = 2 fillRect calls instead of 75
+- Color string generation happens once per row, not per pixel
+- The cell lookup still happens per pixel, but that's fast (just array access)
+
+---
+
+# WALL TOP IMPLEMENTATION COMPLETE!
+
+**Final working solution**:
+1. Render wall tops AFTER walls, as a separate pass
+2. Use horizontal scanline rendering (row by row, like floor rendering)
+3. For each row, project to wall-top plane and check which pixels are inside wall cells
+4. Batch continuous spans into single fillRect calls for performance
+
+**Key learnings**:
+- Wall tops are HORIZONTAL surfaces - must be rendered with horizontal scanlines, NOT vertical strips
+- Column-based approaches will always look like walls growing upward
+- Span batching is crucial for performance - reduces draw calls from hundreds to just a few per row

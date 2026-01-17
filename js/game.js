@@ -669,11 +669,62 @@ class Game {
 
                     // Record wall segment for door clipping
                     wallSegments[strip].push({ dist: correctDist, yStart: drawYStart, yEnd: drawYEnd });
+
                 }
             }
 
             // Store door hits for pass 2
             allDoorHits.push(...doorHits);
+        }
+
+        // === WALL TOP RENDERING (horizontal scanlines, like floor) ===
+        // Only render if player is high enough to see wall tops
+        const wallTopHeight = this.TILE_SIZE; // Height of level 0 wall tops
+        if (cameraZ > wallTopHeight) {
+            const startRow = Math.max(0, Math.floor(horizon) + 1);
+            const endRow = H;
+
+            // Pre-calculate shade color for each distance band to avoid recalculating per pixel
+            for (let screenY = startRow; screenY < endRow; screenY++) {
+                const rowDist = (cameraZ - wallTopHeight) * this.viewDist / (screenY - horizon);
+                if (rowDist <= 0 || rowDist > this.TILE_SIZE * 15) continue;
+
+                // Calculate color once per row
+                const shade = Math.min(rowDist / (this.TILE_SIZE * 8), 0.7);
+                const brightness = Math.floor(120 * (1 - shade));
+                const rowColor = `rgb(${brightness}, ${Math.floor(brightness * 0.8)}, ${Math.floor(brightness * 0.6)})`;
+
+                // Batch spans: track start of current span
+                let spanStart = -1;
+                ctx.fillStyle = rowColor;
+
+                for (let screenX = 0; screenX <= W; screenX += this.stripWidth) {
+                    let isWallTop = false;
+
+                    if (screenX < W) {
+                        const rayOffset = (W / 2 - screenX) / this.viewDist;
+                        const rayAngle = this.player.rot + Math.atan(rayOffset);
+                        const worldX = this.player.x + rowDist * Math.cos(rayAngle);
+                        const worldY = this.player.y - rowDist * Math.sin(rayAngle);
+                        const cellX = Math.floor(worldX / this.TILE_SIZE);
+                        const cellY = Math.floor(worldY / this.TILE_SIZE);
+
+                        if (cellX >= 0 && cellX < MAP_WIDTH && cellY >= 0 && cellY < MAP_HEIGHT) {
+                            const wallType = this.raycaster.cellAt(cellX, cellY, 0);
+                            isWallTop = wallType > 0 && !Raycaster.isDoor(wallType);
+                        }
+                    }
+
+                    if (isWallTop && spanStart < 0) {
+                        // Start new span
+                        spanStart = screenX;
+                    } else if (!isWallTop && spanStart >= 0) {
+                        // End span, draw it
+                        ctx.fillRect(spanStart, screenY, screenX - spanStart, 1);
+                        spanStart = -1;
+                    }
+                }
+            }
         }
 
         // Draw sprites (after walls, before doors)
