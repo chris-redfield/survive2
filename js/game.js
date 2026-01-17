@@ -53,6 +53,7 @@ class Game {
         this.texturesLoaded = false;
 
         this.DEBUG_MODE = false;  // Set to true to enable debug logging
+        this.RENDER_WALL_TOPS = true;  // Set to false to disable wall top rendering
 
         this.fps = 0;
         this.frameCount = 0;
@@ -678,9 +679,9 @@ class Game {
         }
 
         // === WALL TOP RENDERING (horizontal scanlines, like floor) ===
-        // Only render if player is high enough to see wall tops
+        // Only render if feature is enabled and player is high enough to see wall tops
         const wallTopHeight = this.TILE_SIZE; // Height of level 0 wall tops
-        if (cameraZ > wallTopHeight) {
+        if (this.RENDER_WALL_TOPS && cameraZ > wallTopHeight) {
             const startRow = Math.max(0, Math.floor(horizon) + 1);
             const endRow = H;
 
@@ -689,10 +690,10 @@ class Game {
                 const rowDist = (cameraZ - wallTopHeight) * this.viewDist / (screenY - horizon);
                 if (rowDist <= 0 || rowDist > this.TILE_SIZE * 15) continue;
 
-                // Calculate color once per row
+                // Calculate color once per row (purple for wall tops)
                 const shade = Math.min(rowDist / (this.TILE_SIZE * 8), 0.7);
-                const brightness = Math.floor(120 * (1 - shade));
-                const rowColor = `rgb(${brightness}, ${Math.floor(brightness * 0.8)}, ${Math.floor(brightness * 0.6)})`;
+                const brightness = Math.floor(140 * (1 - shade));
+                const rowColor = `rgb(${brightness}, ${Math.floor(brightness * 0.4)}, ${brightness})`;
 
                 // Batch spans: track start of current span
                 let spanStart = -1;
