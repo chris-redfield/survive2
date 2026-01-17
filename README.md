@@ -8,4 +8,5 @@ https://github.com/andrew-lim/sdl2-raycast/tree/master
 - [x] Create additional height levels like the original repo
 - [x] Increase the map size
 - [x] Add transparent doors
+- [x] Fix transparent doors bug
 - [ ] Add slopes
