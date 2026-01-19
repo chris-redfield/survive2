@@ -11,5 +11,5 @@ https://github.com/andrew-lim/sdl2-raycast/tree/master
 - [x] Fix transparent doors bug
 - [x] Add wall tops with solid colors
 - [x] Experiment with adding texture to wall tops (T key to toggle)
-- [ ] Add slopes
+- [~] Add slopes (basic implementation - surface rendering + collision working, side walls pending)
 
