@@ -54,7 +54,6 @@ class Game {
 
         this.DEBUG_MODE = false;  // Set to true to enable debug logging
         this.RENDER_WALL_TOPS = true;  // Set to false to disable wall top rendering
-        this.TEXTURED_WALL_TOPS = true;  // Set to false for solid color wall tops (T key to toggle)
 
         // Wall top rendering buffers (reused each frame for performance)
         this.wallTopCanvas = null;
@@ -313,10 +312,6 @@ class Game {
             if (e.code === 'KeyM') {
                 this.showMinimap = !this.showMinimap;
                 this.minimapCanvas.style.display = this.showMinimap ? 'block' : 'none';
-            }
-            if (e.code === 'KeyT') {
-                this.TEXTURED_WALL_TOPS = !this.TEXTURED_WALL_TOPS;
-                console.log(`Wall top textures: ${this.TEXTURED_WALL_TOPS ? 'ON' : 'OFF'}`);
             }
             if (e.code === 'KeyF') this.interactDoor();
             if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) {
@@ -724,7 +719,7 @@ class Game {
             const startRow = Math.max(0, Math.floor(horizon) + 1);
             const endRow = H;
 
-            if (this.TEXTURED_WALL_TOPS && this.ceilingTexData) {
+            if (this.ceilingTexData) {
                 // === TEXTURED WALL TOPS (offscreen canvas + drawImage for proper alpha compositing) ===
                 const texData = this.ceilingTexData;
                 const texW = this.ceilingTexWidth;
@@ -801,54 +796,6 @@ class Game {
                 // drawImage respects alpha, so transparent pixels won't overwrite walls/floor
                 this.wallTopCtx.putImageData(imgData, 0, 0);
                 ctx.drawImage(this.wallTopCanvas, 0, startRow);
-
-            } else {
-                // === SOLID COLOR WALL TOPS (span batching - original approach) ===
-                for (let screenY = startRow; screenY < endRow; screenY++) {
-                    const rowDist = (cameraZ - wallTopHeight) * this.viewDist / (screenY - horizon);
-                    if (rowDist <= 0 || rowDist > this.TILE_SIZE * 15) continue;
-
-                    // Calculate color once per row (purple for wall tops)
-                    const shade = Math.min(rowDist / (this.TILE_SIZE * 8), 0.7);
-                    const brightness = Math.floor(140 * (1 - shade));
-                    const rowColor = `rgb(${brightness}, ${Math.floor(brightness * 0.4)}, ${brightness})`;
-
-                    // Batch spans: track start of current span
-                    let spanStart = -1;
-                    ctx.fillStyle = rowColor;
-
-                    for (let screenX = 0; screenX <= W; screenX += this.stripWidth) {
-                        let isWallTop = false;
-
-                        if (screenX < W) {
-                            const rayOffset = (W / 2 - screenX) / this.viewDist;
-                            const rayAngle = this.player.rot + Math.atan(rayOffset);
-                            // Fish-eye correction: rays at screen edges travel further
-                            const cosAngle = Math.cos(rayAngle - this.player.rot);
-                            const correctedDist = rowDist / cosAngle;
-                            const worldX = this.player.x + correctedDist * Math.cos(rayAngle);
-                            const worldY = this.player.y - correctedDist * Math.sin(rayAngle);
-                            const cellX = Math.floor(worldX / this.TILE_SIZE);
-                            const cellY = Math.floor(worldY / this.TILE_SIZE);
-
-                            if (cellX >= 0 && cellX < MAP_WIDTH && cellY >= 0 && cellY < MAP_HEIGHT) {
-                                const wallType = this.raycaster.cellAt(cellX, cellY, 0);
-                                const wallAbove = this.raycaster.cellAt(cellX, cellY, 1);
-                                // Only render wall top if there's a wall here AND no wall directly above
-                                isWallTop = wallType > 0 && !Raycaster.isDoor(wallType) && wallAbove === 0;
-                            }
-                        }
-
-                        if (isWallTop && spanStart < 0) {
-                            // Start new span
-                            spanStart = screenX;
-                        } else if (!isWallTop && spanStart >= 0) {
-                            // End span, draw it
-                            ctx.fillRect(spanStart, screenY, screenX - spanStart, 1);
-                            spanStart = -1;
-                        }
-                    }
-                }
             }
         }
 
