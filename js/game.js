@@ -847,7 +847,7 @@ class Game {
         // Draw each slope point from its height down to ground level at that distance
         if (this.RENDER_SLOPES) {
             const slopeBaseR = 140, slopeBaseG = 100, slopeBaseB = 60;
-            const maxDist = this.TILE_SIZE * 15;
+            const maxDist = this.TILE_SIZE * 50;  // Match wall rendering distance
             const stepSize = 4;
 
             for (let screenX = 0; screenX < W; screenX += this.stripWidth) {

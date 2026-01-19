@@ -754,3 +754,35 @@ for (let screenX = 0; screenX < W; screenX += this.stripWidth) {
 5. Reset when leaving slope cell
 
 **Key lesson**: The difference between "infinite vertical bars" and "correct diagonal ramp" was ONE LINE of code - initializing prevScreenY to ground level instead of screen height H.
+
+## Bug Fix: Higher slope parts vanishing when approaching/side view
+**Problem**: When approaching a multi-level slope or viewing from the side, the higher parts (level 1+) would vanish.
+
+**Cause**: The condition `slopeScreenY < prevScreenY` only drew when the slope was going upward on screen. When approaching or viewing from the side, the higher slope cells are farther away, so they project LOWER on screen despite having greater world height. The condition failed and nothing was drawn.
+
+**Solution**: Changed approach to draw each slope point from its height down to ground level, tracking `minScreenYDrawn` to avoid overdraw:
+```javascript
+// Track the highest point drawn so far (smallest screenY) to avoid overdraw
+let minScreenYDrawn = H;
+
+for (let dist = stepSize; dist < maxDist; dist += stepSize) {
+    // ... calculate worldX, worldY, correctDist, slopeHeight ...
+
+    if (slopeHeight > 0) {
+        const projScale = this.viewDist / correctDist;
+        const slopeScreenY = Math.floor(horizon + (cameraZ - slopeHeight) * projScale);
+        const groundScreenY = Math.floor(horizon + cameraZ * projScale);
+
+        // Draw from slope surface to ground (or to minScreenYDrawn to avoid overdraw)
+        const drawTop = Math.max(0, slopeScreenY);
+        const drawBottom = Math.min(minScreenYDrawn, groundScreenY, H);
+
+        if (drawTop < drawBottom && drawTop < minScreenYDrawn) {
+            ctx.fillRect(screenX, drawTop, this.stripWidth, drawBottom - drawTop);
+            minScreenYDrawn = Math.min(minScreenYDrawn, drawTop);
+        }
+    }
+}
+```
+
+**Result**: Slopes now render correctly from all angles, including side views and when approaching multi-level slopes.
