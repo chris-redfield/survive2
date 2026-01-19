@@ -62,6 +62,18 @@ class Game {
         this.ceilingTexWidth = 0;
         this.ceilingTexHeight = 0;
 
+        // Wall top style configuration (used by g_map_walltops)
+        // Solid colors indexed by negative values: -1 = index 0, -2 = index 1, etc.
+        this.wallTopSolidColors = [
+            [140, 56, 140],   // -1: Purple
+            [100, 100, 100], // -2: Gray
+            [139, 90, 43],   // -3: Brown
+            [40, 60, 100],   // -4: Dark Blue
+        ];
+        // Additional textures can be added here (indexed by positive values 1+)
+        // For now, texture ID 0 and 1+ all use ceilingTexData
+        this.wallTopTextures = [];  // Future: array of {data, width, height} for texture IDs 1+
+
         this.fps = 0;
         this.frameCount = 0;
         this.lastFpsTime = 0;
@@ -767,19 +779,33 @@ class Game {
                             const wallAbove = this.raycaster.cellAt(cellX, cellY, 1);
                             // Only render wall top if there's a wall here AND no wall directly above
                             if (wallType > 0 && !Raycaster.isDoor(wallType) && wallAbove === 0) {
-                                // Calculate texture UV from world position
-                                let texU = Math.floor(((worldX % this.TILE_SIZE) + this.TILE_SIZE) % this.TILE_SIZE);
-                                let texV = Math.floor(((worldY % this.TILE_SIZE) + this.TILE_SIZE) % this.TILE_SIZE);
+                                // Get wall top style from map layer
+                                const wallTopStyle = g_map_walltops[cellY][cellX];
+                                let r, g, b;
 
-                                // Scale UV to texture size (TILE_SIZE -> texW/texH)
-                                texU = Math.floor(texU * texW / this.TILE_SIZE) % texW;
-                                texV = Math.floor(texV * texH / this.TILE_SIZE) % texH;
+                                if (wallTopStyle < 0) {
+                                    // Solid color mode: negative values map to color palette
+                                    const colorIndex = (-wallTopStyle) - 1;
+                                    const color = this.wallTopSolidColors[colorIndex] || this.wallTopSolidColors[0];
+                                    r = color[0];
+                                    g = color[1];
+                                    b = color[2];
+                                } else {
+                                    // Texture mode: 0 = default texture, 1+ = additional textures (future)
+                                    // Calculate texture UV from world position
+                                    let texU = Math.floor(((worldX % this.TILE_SIZE) + this.TILE_SIZE) % this.TILE_SIZE);
+                                    let texV = Math.floor(((worldY % this.TILE_SIZE) + this.TILE_SIZE) % this.TILE_SIZE);
 
-                                // Sample texture pixel
-                                const texOffset = (texV * texW + texU) * 4;
-                                const r = texData[texOffset];
-                                const g = texData[texOffset + 1];
-                                const b = texData[texOffset + 2];
+                                    // Scale UV to texture size (TILE_SIZE -> texW/texH)
+                                    texU = Math.floor(texU * texW / this.TILE_SIZE) % texW;
+                                    texV = Math.floor(texV * texH / this.TILE_SIZE) % texH;
+
+                                    // Sample texture pixel
+                                    const texOffset = (texV * texW + texU) * 4;
+                                    r = texData[texOffset];
+                                    g = texData[texOffset + 1];
+                                    b = texData[texOffset + 2];
+                                }
 
                                 // Apply distance shading and write to buffer
                                 const pixelOffset = rowOffset + screenX * 4;

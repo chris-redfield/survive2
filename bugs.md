@@ -360,3 +360,55 @@ const correctedDist = rowDist / cosAngle;
 ```
 
 **Result**: Wall tops now have perfectly straight edges across the entire screen.
+
+---
+
+# WALL TOP CONFIGURATION SYSTEM
+
+## Overview
+Wall tops can be configured per-cell using the `g_map_walltops` array in `maps.js`. This allows different buildings or areas to have different wall top styles (textured or solid colors).
+
+## Map Layer: g_map_walltops (maps.js)
+
+Location: `js/maps.js` (after g_map2, before g_floormap)
+
+### Value Reference:
+| Value | Type | Description |
+|-------|------|-------------|
+| `0` | Texture | Default texture (uses ceilingImage/brick) |
+| `1+` | Texture | Future: additional texture IDs |
+| `-1` | Solid | Purple (RGB: 140, 56, 140) |
+| `-2` | Solid | Gray (RGB: 100, 100, 100) |
+| `-3` | Solid | Brown (RGB: 139, 90, 43) |
+| `-4` | Solid | Dark Blue (RGB: 40, 60, 100) |
+
+### Example Usage:
+```javascript
+// In g_map_walltops array:
+// To make a specific cell use solid purple:
+g_map_walltops[y][x] = -1;
+
+// To make a cell use the default brick texture:
+g_map_walltops[y][x] = 0;
+```
+
+## Color Palette: wallTopSolidColors (game.js)
+
+Location: `js/game.js` (in Game constructor)
+
+```javascript
+this.wallTopSolidColors = [
+    [140, 56, 140],   // -1: Purple
+    [100, 100, 100],  // -2: Gray
+    [139, 90, 43],    // -3: Brown
+    [40, 60, 100],    // -4: Dark Blue
+];
+```
+
+To add more colors, append to this array and use corresponding negative values (-5, -6, etc.)
+
+## Important Notes:
+1. Wall tops only render for cells that have a wall in `g_map` (level 0)
+2. Wall tops do NOT render if there's a wall directly above in `g_map2` (level 1)
+3. The map layer uses the same 64x48 dimensions as other maps
+4. Changes to `g_map_walltops` take effect immediately (no reload needed)
