@@ -689,3 +689,68 @@ THE APPROACH THAT WORKED FOR WALL TOPS SHOULD BE ADAPTED FOR SLOPES!
 4. **Pre-computed lookup tables**: For each slope type, pre-compute the screen projection and cache it.
 
 5. **Simplified rendering**: Just draw slopes as solid colored quadrilaterals without per-pixel height accuracy.
+
+---
+
+## Attempt 11: Column-based with proper initialization (SUCCESS!)
+**Result**: Slopes render correctly as diagonal ramps with good FPS (61).
+
+**Approach**:
+- Column-based iteration (for each screenX, step along ray)
+- **Key fix**: Initialize `prevScreenY = -1` (NOT `H`!)
+- When first encountering a slope point, calculate ground position at that distance: `groundScreenY = horizon + cameraZ * projScale`
+- Set `prevScreenY = min(groundScreenY, H)`
+- Draw vertical strips from `slopeScreenY` to `prevScreenY`
+- Update `prevScreenY = slopeScreenY` after each draw
+- Reset `prevScreenY = -1` when leaving slope cell
+
+**Why it works**:
+- The first vertical strip fills from slope surface down to GROUND LEVEL (not screen bottom)
+- Subsequent strips fill the gap between consecutive slope points
+- This creates the proper diagonal ramp appearance
+- Column-based approach is fast (O(W * maxDist/stepSize))
+
+**Working code** (game.js):
+```javascript
+for (let screenX = 0; screenX < W; screenX += this.stripWidth) {
+    // ... ray setup ...
+    let prevScreenY = -1; // KEY: Not H!
+
+    for (let dist = stepSize; dist < maxDist; dist += stepSize) {
+        // ... calculate worldX, worldY, correctDist ...
+        if (correctDist >= this.zBuffer[screenX]) break;
+
+        const slopeHeight = getHeightAt(worldX, worldY);
+        if (slopeHeight > 0) {
+            const projScale = this.viewDist / correctDist;
+            const slopeScreenY = Math.floor(horizon + (cameraZ - slopeHeight) * projScale);
+
+            if (prevScreenY === -1) {
+                // First slope point - use ground position, not H!
+                const groundScreenY = Math.floor(horizon + cameraZ * projScale);
+                prevScreenY = Math.min(groundScreenY, H);
+            }
+
+            if (slopeScreenY < prevScreenY && slopeScreenY >= 0 && slopeScreenY < H) {
+                ctx.fillRect(screenX, slopeScreenY, stripWidth, prevScreenY - slopeScreenY);
+                prevScreenY = slopeScreenY;
+            }
+        } else if (prevScreenY !== -1) {
+            prevScreenY = -1; // Reset when leaving slope
+        }
+    }
+}
+```
+
+---
+
+# SLOPE RENDERING COMPLETE!
+
+**Final working solution**:
+1. Column-based iteration (fast)
+2. Initialize prevScreenY to -1, not H
+3. On first slope point, set prevScreenY to ground level at that distance
+4. Draw vertical strips between consecutive slope points
+5. Reset when leaving slope cell
+
+**Key lesson**: The difference between "infinite vertical bars" and "correct diagonal ramp" was ONE LINE of code - initializing prevScreenY to ground level instead of screen height H.

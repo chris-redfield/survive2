@@ -843,8 +843,8 @@ class Game {
             }
         }
 
-        // === SLOPE SURFACE RENDERING (column-based, proper initialization) ===
-        // Key fix: Don't initialize prevScreenY to H, initialize to ground level at first slope
+        // === SLOPE SURFACE RENDERING (column-based) ===
+        // Draw each slope point from its height down to ground level at that distance
         if (this.RENDER_SLOPES) {
             const slopeBaseR = 140, slopeBaseG = 100, slopeBaseB = 60;
             const maxDist = this.TILE_SIZE * 15;
@@ -857,8 +857,8 @@ class Game {
                 const rayDirX = Math.cos(rayAngle);
                 const rayDirY = -Math.sin(rayAngle);
 
-                let prevScreenY = -1; // -1 means "not yet on a slope"
-                let lastSlopeHeight = 0;
+                // Track the highest point drawn so far (smallest screenY) to avoid overdraw
+                let minScreenYDrawn = H;
 
                 for (let dist = stepSize; dist < maxDist; dist += stepSize) {
                     const worldX = this.player.x + rayDirX * dist;
@@ -873,26 +873,19 @@ class Game {
                     if (slopeHeight > 0) {
                         const projScale = this.viewDist / correctDist;
                         const slopeScreenY = Math.floor(horizon + (cameraZ - slopeHeight) * projScale);
+                        const groundScreenY = Math.floor(horizon + cameraZ * projScale);
 
-                        if (prevScreenY === -1) {
-                            // First slope point - calculate ground position at this distance
-                            const groundScreenY = Math.floor(horizon + cameraZ * projScale);
-                            prevScreenY = Math.min(groundScreenY, H);
-                        }
+                        // Draw from slope surface to ground (or to minScreenYDrawn to avoid overdraw)
+                        const drawTop = Math.max(0, slopeScreenY);
+                        const drawBottom = Math.min(minScreenYDrawn, groundScreenY, H);
 
-                        // Only draw if we're going upward on screen (slope rising)
-                        if (slopeScreenY < prevScreenY && slopeScreenY >= 0 && slopeScreenY < H) {
+                        if (drawTop < drawBottom && drawTop < minScreenYDrawn) {
                             const shade = Math.min(correctDist / (this.TILE_SIZE * 8), 0.7);
                             const shadeMult = 1 - shade;
                             ctx.fillStyle = `rgb(${Math.floor(slopeBaseR * shadeMult)},${Math.floor(slopeBaseG * shadeMult)},${Math.floor(slopeBaseB * shadeMult)})`;
-                            ctx.fillRect(screenX, slopeScreenY, this.stripWidth, prevScreenY - slopeScreenY);
-                            prevScreenY = slopeScreenY;
+                            ctx.fillRect(screenX, drawTop, this.stripWidth, drawBottom - drawTop);
+                            minScreenYDrawn = Math.min(minScreenYDrawn, drawTop);
                         }
-                        lastSlopeHeight = slopeHeight;
-                    } else if (prevScreenY !== -1) {
-                        // We left the slope - reset for potential next slope
-                        prevScreenY = -1;
-                        lastSlopeHeight = 0;
                     }
                 }
             }

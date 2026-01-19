@@ -9,31 +9,48 @@ const MAP_HEIGHT = 48;
 // ============================================================================
 // SLOPE TYPE CONSTANTS
 // ============================================================================
+// Slope values encode both direction and level:
+//   Direction (last digit): 1=WEST_EAST, 2=EAST_WEST, 3=NORTH_SOUTH, 4=SOUTH_NORTH
+//   Level (tens digit): 0=ground to 64, 1=64 to 128, 2=128 to 192, etc.
+//
+// Examples:
+//   1 = Level 0 WEST_EAST (height 0 → 64)
+//   11 = Level 1 WEST_EAST (height 64 → 128)
+//   21 = Level 2 WEST_EAST (height 128 → 192)
+//   2 = Level 0 EAST_WEST (height 64 → 0, descending)
+//   12 = Level 1 EAST_WEST (height 128 → 64, descending)
+// ============================================================================
 const SLOPE_TYPE_NONE = 0;
-const SLOPE_TYPE_WEST_EAST = 1;      // Rises west to east (+X)
-const SLOPE_TYPE_EAST_WEST = 2;      // Rises east to west (-X)
-const SLOPE_TYPE_NORTH_SOUTH = 3;    // Rises north to south (+Y)
-const SLOPE_TYPE_SOUTH_NORTH = 4;    // Rises south to north (-Y)
+const SLOPE_DIR_WEST_EAST = 1;      // Rises west to east (+X)
+const SLOPE_DIR_EAST_WEST = 2;      // Rises east to west (-X)
+const SLOPE_DIR_NORTH_SOUTH = 3;    // Rises north to south (+Y)
+const SLOPE_DIR_SOUTH_NORTH = 4;    // Rises south to north (-Y)
 
 const SLOPE_TILE_SIZE = 64;  // Must match Game.TILE_SIZE
 
 /**
  * Get height at any world position based on slope map
+ * Supports multi-level slopes for continuous ramps
  */
 function getHeightAt(worldX, worldY) {
     const cellX = Math.floor(worldX / SLOPE_TILE_SIZE);
     const cellY = Math.floor(worldY / SLOPE_TILE_SIZE);
-    const slopeType = g_map_slopes[cellY]?.[cellX] ?? SLOPE_TYPE_NONE;
-    if (slopeType === SLOPE_TYPE_NONE) return 0;
+    const slopeValue = g_map_slopes[cellY]?.[cellX] ?? SLOPE_TYPE_NONE;
+    if (slopeValue === SLOPE_TYPE_NONE) return 0;
+
+    // Decode level and direction from slope value
+    const level = Math.floor(slopeValue / 10);
+    const direction = slopeValue % 10;
+    const baseHeight = level * SLOPE_TILE_SIZE;
 
     const localX = (worldX % SLOPE_TILE_SIZE) / SLOPE_TILE_SIZE;
     const localY = (worldY % SLOPE_TILE_SIZE) / SLOPE_TILE_SIZE;
 
-    switch (slopeType) {
-        case SLOPE_TYPE_WEST_EAST: return SLOPE_TILE_SIZE * localX;
-        case SLOPE_TYPE_EAST_WEST: return SLOPE_TILE_SIZE * (1 - localX);
-        case SLOPE_TYPE_NORTH_SOUTH: return SLOPE_TILE_SIZE * localY;
-        case SLOPE_TYPE_SOUTH_NORTH: return SLOPE_TILE_SIZE * (1 - localY);
+    switch (direction) {
+        case SLOPE_DIR_WEST_EAST: return baseHeight + SLOPE_TILE_SIZE * localX;
+        case SLOPE_DIR_EAST_WEST: return baseHeight + SLOPE_TILE_SIZE * (1 - localX);
+        case SLOPE_DIR_NORTH_SOUTH: return baseHeight + SLOPE_TILE_SIZE * localY;
+        case SLOPE_DIR_SOUTH_NORTH: return baseHeight + SLOPE_TILE_SIZE * (1 - localY);
         default: return 0;
     }
 }
@@ -218,7 +235,7 @@ const g_map_slopes = [
     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0,1,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,1,11,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
