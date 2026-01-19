@@ -9,4 +9,7 @@ https://github.com/andrew-lim/sdl2-raycast/tree/master
 - [x] Increase the map size
 - [x] Add transparent doors
 - [x] Fix transparent doors bug
+- [x] Add wall tops with solid colors
+- [x] Experiment with adding texture to wall tops (T key to toggle)
 - [ ] Add slopes
+
