@@ -11,8 +11,7 @@ const THICK_WALL_TYPE_RECT = 1;
 const THICK_WALL_TYPE_TRIANGLE = 2;
 const THICK_WALL_TYPE_QUAD = 3;
 
-const SLOPE_TYPE_WEST_EAST = 1;
-const SLOPE_TYPE_NORTH_SOUTH = 2;
+// Note: SLOPE_TYPE constants are defined in maps.js
 
 /**
  * ThinWall - Represents a line segment wall

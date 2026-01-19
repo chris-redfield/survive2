@@ -412,3 +412,280 @@ To add more colors, append to this array and use corresponding negative values (
 2. Wall tops do NOT render if there's a wall directly above in `g_map2` (level 1)
 3. The map layer uses the same 64x48 dimensions as other maps
 4. Changes to `g_map_walltops` take effect immediately (no reload needed)
+
+---
+
+# Slope Implementation - Failed Attempts
+
+## Overview
+Slopes are diagonal surfaces (ramps) that connect ground level (0) to platform height (TILE_SIZE=64). They face the same fundamental challenge as wall tops: they are horizontal-ish surfaces that must be rendered with horizontal scanlines, NOT vertical strips.
+
+## Data Structure (Working)
+The slope data structure in `maps.js` works correctly:
+
+```javascript
+const SLOPE_TYPE_NONE = 0;
+const SLOPE_TYPE_WEST_EAST = 1;      // Rises west to east (+X)
+const SLOPE_TYPE_EAST_WEST = 2;      // Rises east to west (-X)
+const SLOPE_TYPE_NORTH_SOUTH = 3;    // Rises north to south (+Y)
+const SLOPE_TYPE_SOUTH_NORTH = 4;    // Rises south to north (-Y)
+
+function getHeightAt(worldX, worldY) {
+    // Returns interpolated height (0 to TILE_SIZE) based on position in slope cell
+}
+```
+
+## Collision Detection (Working)
+- `isWall()` modified to return `false` for slope cells (slopes are passable)
+- `update()` sets `player.groundZ = getHeightAt(player.x, player.y)` so player walks up/down slopes
+
+---
+
+## Attempt 1: Sparse point-based rendering
+**Problem**: Slopes not visible at all.
+
+**Approach**: Cast rays and draw individual pixels at slope intersection points.
+
+**Root cause**: Too sparse - individual pixels don't form visible surfaces.
+
+## Attempt 2: Row-based scanline rendering
+**Problem**: FPS dropped to 5, game unplayable.
+
+**Approach**: For each screen row, check every pixel for slope intersection.
+
+**Root cause**: O(H * W * maxDist) complexity - checking every screen pixel against every ray distance is extremely slow.
+
+## Attempt 3: Column-based vertical strip rendering (Initial)
+**Problem**: Slopes appeared as vertical bars extending to bottom of screen.
+
+**Approach**: For each screen column, step along ray and draw vertical strips from slope point down.
+
+```javascript
+for (let screenX = 0; screenX < W; screenX += stripWidth) {
+    let prevScreenY = H;  // Start at bottom of screen
+    for (let dist = 4; dist < maxDist; dist += 4) {
+        // ... calculate slopeScreenY ...
+        ctx.fillRect(screenX, slopeScreenY, stripWidth, prevScreenY - slopeScreenY);
+        prevScreenY = slopeScreenY;
+    }
+}
+```
+
+**Root cause**: Drawing from `slopeScreenY` down to `prevScreenY` (which starts at screen height H) creates vertical lines extending to screen bottom. This is the exact same problem wall tops had - vertical strip approach doesn't work for horizontal surfaces.
+
+## Attempt 4: Column-based with fillRect connecting points
+**Problem**: Good FPS (61), slopes visible as diagonal ramps, but implementation fragile.
+
+**Approach**: Draw filled strips connecting adjacent slope points along each ray.
+
+**Result**: This worked visually! Slopes looked correct. But when trying to add features (larger slopes, side walls, textures), the implementation broke repeatedly.
+
+## Attempt 5: Larger slopes (4x4 tiles)
+**Problem**: FPS dropped to 18-19, slopes rendered with artifacts.
+
+**Changes**: Moved slopes to center of map (rows 21-24, columns 26-29 and 34-37), made them 4x4 tiles.
+
+**Root cause**: More slope cells = more rendering work. The vertical strip approach doesn't scale well.
+
+## Attempt 6: Added procedural brick texture
+**Problem**: FPS dropped to 18-19, unplayable.
+
+**Changes**: Added `getSlopeTexture()` function for per-pixel color calculation.
+
+**Root cause**: Per-pixel color calculation in inner loop is extremely expensive.
+
+## Attempt 7: Revert to small test slopes
+**Problem**: Slopes disappeared entirely.
+
+**Changes**: Reverted slope map to original small slopes at row 5, cols 8 and 10. Changed step size from 1 to 4.
+
+**Root cause**: The code changes for side walls and textures corrupted the basic rendering logic.
+
+## Attempt 8: Complete revert to simple rendering (Current State)
+**Result**: Slopes visible again with 61 FPS, BUT they have vertical infinite lines extending to screen bottom.
+
+**Current code** (game.js lines ~846-888):
+```javascript
+for (let screenX = 0; screenX < W; screenX += this.stripWidth) {
+    let prevScreenY = H;
+    for (let dist = 4; dist < maxDist; dist += 4) {
+        // ... calculate slope height and screen position ...
+        if (slopeScreenY >= 0 && slopeScreenY < H && slopeScreenY < prevScreenY) {
+            ctx.fillRect(screenX, slopeScreenY, stripWidth, prevScreenY - slopeScreenY);
+            prevScreenY = slopeScreenY;
+        }
+    }
+}
+```
+
+**Root cause**: Same as wall tops - vertical strip rendering creates infinite lines because `prevScreenY` starts at `H` (screen bottom).
+
+---
+
+## Key Insights
+
+### The Fundamental Problem
+Slopes (like wall tops and floors) are SURFACES that extend horizontally. They MUST be rendered with HORIZONTAL SCANLINES (row by row), NOT vertical strips (column by column).
+
+The vertical strip approach treats each ray column independently, filling downward from the slope point. This creates:
+- Vertical bars extending to screen bottom on first iteration
+- Gaps between columns if step size is too large
+- Incorrect surface appearance (looks like vertical walls, not diagonal ramps)
+
+### Why Wall Tops Work (Reference)
+Wall tops use horizontal scanline rendering:
+```javascript
+for (let screenY = startY; screenY < endY; screenY++) {
+    // Calculate distance for this row on the surface plane
+    const rowDist = (cameraZ - surfaceHeight) * viewDist / (screenY - horizon);
+
+    for (let screenX = 0; screenX < W; screenX += stripWidth) {
+        // Calculate world position for this pixel
+        // Check if position is on the surface
+        // Draw pixel
+    }
+}
+```
+
+### Why Slopes Are Harder
+Unlike wall tops (which have constant height across a cell), slopes have VARIABLE height that depends on position within the cell. This means:
+
+1. **No single "surface height"**: Can't use simple `rowDist = (cameraZ - height) * viewDist / (screenY - horizon)` formula
+2. **Height changes along ray**: The slope height at the near end of a ray differs from the far end
+3. **Ray-surface intersection**: Must find where the ray actually intersects the slope surface, not just project to a flat plane
+
+---
+
+## Potential Solutions
+
+### Solution A: Adaptive horizontal scanlines
+For each screen row:
+1. Calculate distance range that could hit slopes
+2. For each pixel in row, find if ray at that distance intersects a slope
+3. If yes, draw the pixel
+
+**Challenge**: Finding ray-slope intersection for variable height surface.
+
+### Solution B: Ray marching with proper surface detection
+Step along each ray and detect when ray passes through slope surface:
+```javascript
+for each ray:
+    for dist from near to far:
+        worldPos = player + ray * dist
+        slopeHeight = getHeightAt(worldPos)
+        rayHeight = cameraZ - (dist * (screenY - horizon) / viewDist)
+        if rayHeight <= slopeHeight:
+            // Ray has entered the slope - draw this point
+            break
+```
+
+**Challenge**: Getting the ray height calculation correct for perspective projection.
+
+### Solution C: Polygon rasterization
+Calculate the 4 corners of each slope cell in screen space, then rasterize the resulting quadrilateral.
+
+**Challenge**: Complex math, potential for gaps between adjacent slopes.
+
+---
+
+## Performance Considerations
+
+From failed attempts:
+- Per-pixel fillRect: Too slow (FPS < 10)
+- Per-pixel color calculation: Too slow (FPS < 20)
+- Step size 1: Accurate but slow
+- Step size 4: Fast but gaps possible
+
+From wall top success:
+- Span batching is crucial: Batch continuous spans into single fillRect calls
+- Calculate color once per row, not per pixel
+- Cell lookup (array access) is fast; draw calls are expensive
+
+---
+
+## Files Modified
+
+| File | Changes |
+|------|---------|
+| `js/maps.js` | Slope constants, `getHeightAt()`, `g_map_slopes` array |
+| `js/game.js` | `isWall()` modification, `update()` modification, slope rendering code |
+| `js/raycaster.js` | Had duplicate slope constants (removed) |
+
+---
+
+## Current Test Setup
+
+Small test slopes at row 5:
+- Column 8: SLOPE_TYPE_WEST_EAST (rises west to east)
+- Column 10: SLOPE_TYPE_EAST_WEST (rises east to west)
+
+---
+
+## CRITICAL REMINDER FOR FUTURE ATTEMPTS:
+
+SLOPES ARE HORIZONTAL SURFACES LIKE FLOORS AND WALL TOPS!
+THEY MUST BE RENDERED WITH HORIZONTAL SCANLINES, NOT VERTICAL STRIPS!
+THE APPROACH THAT WORKED FOR WALL TOPS SHOULD BE ADAPTED FOR SLOPES!
+
+---
+
+## Attempt 9: Horizontal scanlines with ground-level projection
+**Problem**: Slopes rendered as flat quadrilateral on the ground, not as raised ramps.
+
+**Approach**:
+- For each screenY row, calculate distance to ground level (height=0)
+- Project to world position and check if slope exists
+- Check if `rayHeight <= slopeHeight`
+
+**Root cause**: The formula `rowDistGround = cameraZ * viewDist / (screenY - horizon)` always projects to ground level. The rayHeight calculation then equals ~0, so we only see where slopes exist at ground level, not their raised portions.
+
+## Attempt 10: Horizontal scanlines with ray marching
+**Problem**: Terrible FPS (single digits), slopes rendered as horizontal stripes filling large portions of screen incorrectly.
+
+**Approach**:
+- For each screenY row, for each screenX pixel
+- March along ray at step intervals (stepSize=8)
+- At each step, calculate where slope point would project: `projScreenY = horizon + (cameraZ - slopeHeight) * viewDist / correctDist`
+- If `projScreenY <= screenY`, draw pixel
+
+**Root cause**:
+1. **Performance**: O(H * W * maxDist/stepSize) = O(300 * 400 * 120) = 14.4 million iterations per frame. Even with span batching, this is way too slow.
+2. **Visual bug**: The condition `projScreenY <= screenY` fills everything BELOW the slope's top edge, creating horizontal bands instead of the actual slope surface.
+
+---
+
+## Key Insight: Why Slopes Are Different From Wall Tops
+
+**Wall tops work because**:
+- They have a CONSTANT height (TILE_SIZE)
+- For any screenY, there's exactly ONE distance where that height is visible
+- Formula: `rowDist = (cameraZ - wallTopHeight) * viewDist / (screenY - horizon)`
+- We just check if that world position is on a wall
+
+**Slopes don't work the same way because**:
+- They have VARIABLE height (0 to TILE_SIZE depending on position)
+- For any screenY, MULTIPLE distances could show different parts of the slope
+- There's no simple closed-form solution for ray-slope intersection
+- The slope height depends on world position, which depends on distance, which we're trying to find
+
+---
+
+## Approaches NOT to try again:
+
+1. **Per-pixel ray marching** - Too slow (O(H*W*steps))
+2. **Ground-level projection with height check** - Only shows base of slope
+3. **Vertical strips with prevScreenY=H** - Creates infinite vertical bars
+4. **Per-pixel fillRect** - Too slow
+5. **Per-pixel color calculation** - Too slow
+
+## Approaches that might work:
+
+1. **Polygon rasterization**: Project the 4 corners of each slope cell to screen space, rasterize the resulting quadrilateral. Fast but complex math.
+
+2. **Column-based with proper initialization**: Fix the vertical strip approach by initializing prevScreenY to the correct starting point (not H).
+
+3. **Hybrid approach**: Use wall-top style scanlines but only for the TOP edge of slopes, then fill down to ground with vertical strips.
+
+4. **Pre-computed lookup tables**: For each slope type, pre-compute the screen projection and cache it.
+
+5. **Simplified rendering**: Just draw slopes as solid colored quadrilaterals without per-pixel height accuracy.

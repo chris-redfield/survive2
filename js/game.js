@@ -74,6 +74,11 @@ class Game {
         // For now, texture ID 0 and 1+ all use ceilingTexData
         this.wallTopTextures = [];  // Future: array of {data, width, height} for texture IDs 1+
 
+        // Slope rendering
+        this.RENDER_SLOPES = true;
+        this.slopeCanvas = null;
+        this.slopeCtx = null;
+
         this.fps = 0;
         this.frameCount = 0;
         this.lastFpsTime = 0;
@@ -378,6 +383,9 @@ class Game {
         const cx = Math.floor(x / this.TILE_SIZE);
         const cy = Math.floor(y / this.TILE_SIZE);
         if (cx < 0 || cx >= MAP_WIDTH || cy < 0 || cy >= MAP_HEIGHT) return true;
+        // Slopes are passable (not walls)
+        const slopeType = g_map_slopes[cy]?.[cx] ?? SLOPE_TYPE_NONE;
+        if (slopeType !== SLOPE_TYPE_NONE) return false;
         const wall = this.raycaster.cellAt(cx, cy, 0);
         if (Raycaster.isDoor(wall)) return !this.doors[cx + cy * MAP_WIDTH];
         return wall > 0;
@@ -415,6 +423,9 @@ class Game {
         const newY = this.player.y + dy;
         if (!this.isWall(newX, this.player.y)) this.player.x = newX;
         if (!this.isWall(this.player.x, newY)) this.player.y = newY;
+
+        // Update ground height based on slope
+        this.player.groundZ = getHeightAt(this.player.x, this.player.y);
 
         if (this.keys['PageUp']) this.pitch = Math.min(this.pitch + 10, 200);
         if (this.keys['PageDown']) this.pitch = Math.max(this.pitch - 10, -200);
@@ -829,6 +840,61 @@ class Game {
                 // drawImage respects alpha, so transparent pixels won't overwrite walls/floor
                 this.wallTopCtx.putImageData(imgData, 0, 0);
                 ctx.drawImage(this.wallTopCanvas, 0, startRow);
+            }
+        }
+
+        // === SLOPE SURFACE RENDERING (column-based, proper initialization) ===
+        // Key fix: Don't initialize prevScreenY to H, initialize to ground level at first slope
+        if (this.RENDER_SLOPES) {
+            const slopeBaseR = 140, slopeBaseG = 100, slopeBaseB = 60;
+            const maxDist = this.TILE_SIZE * 15;
+            const stepSize = 4;
+
+            for (let screenX = 0; screenX < W; screenX += this.stripWidth) {
+                const rayOffset = (W / 2 - screenX) / this.viewDist;
+                const rayAngle = this.player.rot + Math.atan(rayOffset);
+                const cosAngle = Math.cos(rayAngle - this.player.rot);
+                const rayDirX = Math.cos(rayAngle);
+                const rayDirY = -Math.sin(rayAngle);
+
+                let prevScreenY = -1; // -1 means "not yet on a slope"
+                let lastSlopeHeight = 0;
+
+                for (let dist = stepSize; dist < maxDist; dist += stepSize) {
+                    const worldX = this.player.x + rayDirX * dist;
+                    const worldY = this.player.y + rayDirY * dist;
+                    const correctDist = dist * cosAngle;
+
+                    // Z-buffer check
+                    if (correctDist >= this.zBuffer[screenX]) break;
+
+                    const slopeHeight = getHeightAt(worldX, worldY);
+
+                    if (slopeHeight > 0) {
+                        const projScale = this.viewDist / correctDist;
+                        const slopeScreenY = Math.floor(horizon + (cameraZ - slopeHeight) * projScale);
+
+                        if (prevScreenY === -1) {
+                            // First slope point - calculate ground position at this distance
+                            const groundScreenY = Math.floor(horizon + cameraZ * projScale);
+                            prevScreenY = Math.min(groundScreenY, H);
+                        }
+
+                        // Only draw if we're going upward on screen (slope rising)
+                        if (slopeScreenY < prevScreenY && slopeScreenY >= 0 && slopeScreenY < H) {
+                            const shade = Math.min(correctDist / (this.TILE_SIZE * 8), 0.7);
+                            const shadeMult = 1 - shade;
+                            ctx.fillStyle = `rgb(${Math.floor(slopeBaseR * shadeMult)},${Math.floor(slopeBaseG * shadeMult)},${Math.floor(slopeBaseB * shadeMult)})`;
+                            ctx.fillRect(screenX, slopeScreenY, this.stripWidth, prevScreenY - slopeScreenY);
+                            prevScreenY = slopeScreenY;
+                        }
+                        lastSlopeHeight = slopeHeight;
+                    } else if (prevScreenY !== -1) {
+                        // We left the slope - reset for potential next slope
+                        prevScreenY = -1;
+                        lastSlopeHeight = 0;
+                    }
+                }
             }
         }
 
