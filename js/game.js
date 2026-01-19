@@ -763,7 +763,8 @@ class Game {
                     const bufferY = screenY - startRow;
                     const rowOffset = bufferY * W * 4;
 
-                    for (let screenX = 0; screenX < W; screenX++) {
+                    // Process every stripWidth pixels for performance (halves calculations)
+                    for (let screenX = 0; screenX < W; screenX += this.stripWidth) {
                         const rayOffset = (W / 2 - screenX) / this.viewDist;
                         const rayAngle = this.player.rot + Math.atan(rayOffset);
                         // Fish-eye correction
@@ -779,8 +780,8 @@ class Game {
                             const wallAbove = this.raycaster.cellAt(cellX, cellY, 1);
                             // Only render wall top if there's a wall here AND no wall directly above
                             if (wallType > 0 && !Raycaster.isDoor(wallType) && wallAbove === 0) {
-                                // Get wall top style from map layer
-                                const wallTopStyle = g_map_walltops[cellY][cellX];
+                                // Get wall top style from map layer (with safety check)
+                                const wallTopStyle = g_map_walltops[cellY]?.[cellX] ?? 0;
                                 let r, g, b;
 
                                 if (wallTopStyle < 0) {
@@ -807,12 +808,18 @@ class Game {
                                     b = texData[texOffset + 2];
                                 }
 
-                                // Apply distance shading and write to buffer
-                                const pixelOffset = rowOffset + screenX * 4;
-                                pixels[pixelOffset] = Math.floor(r * shadeMult);
-                                pixels[pixelOffset + 1] = Math.floor(g * shadeMult);
-                                pixels[pixelOffset + 2] = Math.floor(b * shadeMult);
-                                pixels[pixelOffset + 3] = 255; // Fully opaque
+                                // Apply distance shading and write stripWidth pixels at once
+                                const shadedR = Math.floor(r * shadeMult);
+                                const shadedG = Math.floor(g * shadeMult);
+                                const shadedB = Math.floor(b * shadeMult);
+
+                                for (let sx = 0; sx < this.stripWidth && screenX + sx < W; sx++) {
+                                    const pixelOffset = rowOffset + (screenX + sx) * 4;
+                                    pixels[pixelOffset] = shadedR;
+                                    pixels[pixelOffset + 1] = shadedG;
+                                    pixels[pixelOffset + 2] = shadedB;
+                                    pixels[pixelOffset + 3] = 255;
+                                }
                             }
                         }
                     }
