@@ -7,8 +7,8 @@ const ASSETS_PATH = 'assets/';
 
 class Game {
     constructor() {
-        this.displayWidth = 800;
-        this.displayHeight = 600;
+        this.displayWidth = 1024;
+        this.displayHeight = 768;
         this.stripWidth = 2;
 
         this.TILE_SIZE = 64;
