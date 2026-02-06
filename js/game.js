@@ -859,6 +859,9 @@ class Game {
 
                 // Track the highest point drawn so far (smallest screenY) to avoid overdraw
                 let minScreenYDrawn = H;
+                // Track slope coverage for this column (for door clipping + z-buffer)
+                let slopeMinY = H, slopeMaxY = 0;
+                let slopeNearDist = Infinity;
 
                 for (let dist = stepSize; dist < maxDist; dist += stepSize) {
                     const worldX = this.player.x + rayDirX * dist;
@@ -885,7 +888,29 @@ class Game {
                             ctx.fillStyle = `rgb(${Math.floor(slopeBaseR * shadeMult)},${Math.floor(slopeBaseG * shadeMult)},${Math.floor(slopeBaseB * shadeMult)})`;
                             ctx.fillRect(screenX, drawTop, this.stripWidth, drawBottom - drawTop);
                             minScreenYDrawn = Math.min(minScreenYDrawn, drawTop);
+
+                            // Track slope screen coverage and nearest distance
+                            if (drawTop < slopeMinY) slopeMinY = drawTop;
+                            if (drawBottom > slopeMaxY) slopeMaxY = drawBottom;
+                            if (correctDist < slopeNearDist) slopeNearDist = correctDist;
                         }
+                    }
+                }
+
+                // Update z-buffer so sprites are occluded by slopes
+                if (slopeNearDist < this.zBuffer[screenX]) {
+                    for (let sx = screenX; sx < screenX + this.stripWidth && sx < W; sx++) {
+                        if (slopeNearDist < this.zBuffer[sx]) {
+                            this.zBuffer[sx] = slopeNearDist;
+                        }
+                    }
+                }
+
+                // Add slope segment for door clipping
+                if (slopeMinY < slopeMaxY) {
+                    const strip = Math.floor(screenX / this.stripWidth);
+                    if (strip >= 0 && strip < wallSegments.length) {
+                        wallSegments[strip].push({ dist: slopeNearDist, yStart: slopeMinY, yEnd: slopeMaxY });
                     }
                 }
             }
